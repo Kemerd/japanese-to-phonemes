@@ -5,7 +5,7 @@ setlocal enabledelayedexpansion
 echo.
 echo ╔══════════════════════════════════════════════════════════╗
 echo ║  Japanese Phoneme Converter - Performance Benchmarks    ║
-echo ║  Testing Dart, Python, and JavaScript                   ║
+echo ║  Testing ALL 5 Implementations                          ║
 echo ╚══════════════════════════════════════════════════════════╝
 echo.
 
@@ -17,7 +17,53 @@ set "MULTIPARA=日本は美しい国です。春には桜が咲き、夏は海�
 
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
-echo [1/3] DART BENCHMARKS
+echo [1/5] RUST BENCHMARKS
+echo.
+echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo.
+
+echo [RUST] Simple (5 chars): %SIMPLE%
+jpn_to_phoneme_rs.exe "%SIMPLE%"
+echo.
+
+echo [RUST] Medium (10 chars): %MEDIUM%
+jpn_to_phoneme_rs.exe "%MEDIUM%"
+echo.
+
+echo [RUST] Large (50+ chars): %LARGE%
+jpn_to_phoneme_rs.exe "%LARGE%"
+echo.
+
+echo [RUST] Multi-paragraph (150+ chars): %MULTIPARA%
+jpn_to_phoneme_rs.exe "%MULTIPARA%"
+echo.
+
+echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo.
+echo [2/5] C++ BENCHMARKS
+echo.
+echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo.
+
+echo [C++] Simple (5 chars): %SIMPLE%
+jpn_to_phoneme_cpp.exe "%SIMPLE%"
+echo.
+
+echo [C++] Medium (10 chars): %MEDIUM%
+jpn_to_phoneme_cpp.exe "%MEDIUM%"
+echo.
+
+echo [C++] Large (50+ chars): %LARGE%
+jpn_to_phoneme_cpp.exe "%LARGE%"
+echo.
+
+echo [C++] Multi-paragraph (150+ chars): %MULTIPARA%
+jpn_to_phoneme_cpp.exe "%MULTIPARA%"
+echo.
+
+echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo.
+echo [3/5] DART BENCHMARKS
 echo.
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
@@ -40,7 +86,7 @@ echo.
 
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
-echo [2/3] PYTHON BENCHMARKS
+echo [4/5] PYTHON BENCHMARKS
 echo.
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
@@ -63,7 +109,7 @@ echo.
 
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
-echo [3/3] JAVASCRIPT BENCHMARKS
+echo [5/5] JAVASCRIPT BENCHMARKS
 echo.
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
@@ -89,10 +135,17 @@ echo.
 echo ✨ All benchmarks complete!
 echo.
 echo Summary of test cases:
-echo   • Simple:         5 characters
-echo   • Medium:         10 characters
-echo   • Large:          50+ characters
-echo   • Multi-paragraph: 150+ characters
+echo   • Simple:         5 characters    (こんにちは)
+echo   • Medium:         10 characters   (今日はいい天気ですね)
+echo   • Large:          50+ characters  (私は東京都に住んでいます...)
+echo   • Multi-paragraph: 150+ characters (日本は美しい国です...)
+echo.
+echo Languages tested:
+echo   [1] Rust          (compiled, -O optimization)
+echo   [2] C++           (compiled, -O3 optimization)
+echo   [3] Dart          (JIT compiled)
+echo   [4] Python        (interpreted)
+echo   [5] JavaScript    (Node.js V8 engine)
 echo.
 pause
 

@@ -13,6 +13,11 @@
 #include <sstream>
 #include <iomanip>
 
+// Windows-specific includes for UTF-8 console support
+#ifdef _WIN32
+    #include <windows.h>
+#endif
+
 // Check for optional support (C++17)
 #if __cplusplus >= 201703L && __has_include(<optional>)
     #include <optional>
@@ -24,29 +29,35 @@
     class Optional {
     private:
         bool has_val;
-        union { T value; };
+        union Storage { 
+            T val; 
+            Storage() {} 
+            ~Storage() {} 
+        } storage;
     public:
         Optional() : has_val(false) {}
-        Optional(const T& v) : has_val(true), value(v) {}
+        Optional(const T& v) : has_val(true) { new (&storage.val) T(v); }
         Optional(const Optional& other) : has_val(other.has_val) {
-            if (has_val) new (&value) T(other.value);
+            if (has_val) new (&storage.val) T(other.storage.val);
         }
-        ~Optional() { if (has_val) value.~T(); }
+        ~Optional() { if (has_val) storage.val.~T(); }
         
         Optional& operator=(const Optional& other) {
             if (this != &other) {
-                if (has_val) value.~T();
+                if (has_val) storage.val.~T();
                 has_val = other.has_val;
-                if (has_val) new (&value) T(other.value);
+                if (has_val) new (&storage.val) T(other.storage.val);
             }
             return *this;
         }
         
         bool has_value() const { return has_val; }
-        T& operator*() { return value; }
-        const T& operator*() const { return value; }
-        T* operator->() { return &value; }
-        const T* operator->() const { return &value; }
+        T& value() { return storage.val; }
+        const T& value() const { return storage.val; }
+        T& operator*() { return storage.val; }
+        const T& operator*() const { return storage.val; }
+        T* operator->() { return &storage.val; }
+        const T* operator->() const { return &storage.val; }
     };
 #endif
 
@@ -202,8 +213,8 @@ public:
         auto start_time = std::chrono::high_resolution_clock::now();
         
         // Insert each entry into the trie
-        for (const auto& [key, value] : data) {
-            insert(key, value);
+        for (const auto& entry : data) {
+            insert(entry.first, entry.second);
             entry_count++;
             
             // Progress indicator for large datasets
@@ -283,8 +294,8 @@ public:
                 pos += match_length;
             } else {
                 // No match found - keep original character and continue
-                auto [char_str, code] = get_char_at(japanese_text, pos);
-                result += char_str;
+                auto char_pair = get_char_at(japanese_text, pos);
+                result += char_pair.first;
             }
         }
         
@@ -335,9 +346,9 @@ public:
                 pos += match_length;
             } else {
                 // No match found
-                auto [char_str, code] = get_char_at(japanese_text, pos);
-                result.unmatched.push_back(char_str);
-                result.phonemes += char_str;
+                auto char_pair = get_char_at(japanese_text, pos);
+                result.unmatched.push_back(char_pair.first);
+                result.phonemes += char_pair.first;
             }
         }
         
@@ -345,7 +356,34 @@ public:
     }
 };
 
+// Helper function to get UTF-8 command line arguments on Windows
+#ifdef _WIN32
+std::vector<std::string> get_utf8_args() {
+    std::vector<std::string> args;
+    int nArgs;
+    LPWSTR* szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+    
+    if (szArglist != NULL) {
+        for (int i = 0; i < nArgs; i++) {
+            int size_needed = WideCharToMultiByte(CP_UTF8, 0, szArglist[i], -1, NULL, 0, NULL, NULL);
+            std::string utf8_arg(size_needed - 1, 0);
+            WideCharToMultiByte(CP_UTF8, 0, szArglist[i], -1, &utf8_arg[0], size_needed, NULL, NULL);
+            args.push_back(utf8_arg);
+        }
+        LocalFree(szArglist);
+    }
+    return args;
+}
+#endif
+
 int main(int argc, char* argv[]) {
+    // Enable UTF-8 support for Windows console
+    #ifdef _WIN32
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+        setvbuf(stdout, nullptr, _IOFBF, 1000);
+    #endif
+    
     std::cout << "╔══════════════════════════════════════════════════════════╗" << std::endl;
     std::cout << "║  Japanese → Phoneme Converter (C++)                     ║" << std::endl;
     std::cout << "║  Blazing fast IPA phoneme conversion                    ║" << std::endl;
@@ -371,7 +409,15 @@ int main(int argc, char* argv[]) {
     
     std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" << std::endl;
     
-    if (argc < 2) {
+    // Get UTF-8 arguments on Windows
+    #ifdef _WIN32
+        auto utf8_args = get_utf8_args();
+        int arg_count = utf8_args.size();
+    #else
+        int arg_count = argc;
+    #endif
+    
+    if (arg_count < 2) {
         // Interactive mode
         std::cout << "💡 Usage: ./jpn_to_phoneme \"日本語テキスト\"" << std::endl;
         std::cout << "   Or enter Japanese text interactively:\n" << std::endl;
@@ -421,8 +467,12 @@ int main(int argc, char* argv[]) {
         }
     } else {
         // Batch mode - convert all arguments
-        for (int i = 1; i < argc; i++) {
-            std::string text = argv[i];
+        for (int i = 1; i < arg_count; i++) {
+            #ifdef _WIN32
+                std::string text = utf8_args[i];
+            #else
+                std::string text = argv[i];
+            #endif
             
             // Perform conversion with timing
             auto start_time = std::chrono::high_resolution_clock::now();
