@@ -8,6 +8,14 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import { performance } from 'perf_hooks';
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Enable word segmentation to add spaces between words in output
+// Uses ja_words.txt for Japanese word boundaries
+const USE_WORD_SEGMENTATION = true;
+
 /**
  * High-performance trie node for phoneme lookup
  * Uses Map for O(1) character code access
@@ -194,6 +202,201 @@ class PhonemeConverter {
 }
 
 /**
+ * Word segmenter using longest-match algorithm with word dictionary
+ * Splits Japanese text into words for better phoneme spacing
+ */
+class WordSegmenter {
+  private root: TrieNode = new TrieNode();
+  private wordCount: number = 0;
+  
+  /**
+   * Load word list from text file (one word per line)
+   */
+  loadFromFile(filePath: string): void {
+    console.log('🔥 Loading word dictionary for segmentation...');
+    const startTime = performance.now();
+    
+    const contents = fs.readFileSync(filePath, 'utf-8');
+    const lines = contents.split('\n');
+    
+    for (let line of lines) {
+      line = line.trim();
+      if (line) {
+        this.insertWord(line);
+        this.wordCount++;
+        
+        if (this.wordCount % 50000 === 0) {
+          process.stdout.write(`\r   Loaded: ${this.wordCount} words`);
+        }
+      }
+    }
+    
+    const elapsed = performance.now() - startTime;
+    console.log(`\n✅ Loaded ${this.wordCount} words in ${elapsed.toFixed(0)}ms`);
+  }
+  
+  /**
+   * Insert a word into the trie
+   */
+  private insertWord(word: string): void {
+    let current = this.root;
+    
+    for (let i = 0; i < word.length; i++) {
+      const charCode = word.charCodeAt(i);
+      
+      if (!current.children.has(charCode)) {
+        current.children.set(charCode, new TrieNode());
+      }
+      current = current.children.get(charCode)!;
+    }
+    
+    // Mark end of word (use empty string as marker)
+    current.phoneme = "";
+  }
+  
+  /**
+   * Segment text into words using longest-match algorithm
+   * 
+   * SMART SEGMENTATION: Words are matched from dictionary, and any
+   * unmatched sequences between words are treated as grammatical elements
+   * (particles, conjugations, etc.) and given their own space.
+   * 
+   * Example: 私はリンゴがすきです
+   * - Matches: 私, リンゴ, すき
+   * - Grammar (unmatched): は, が, です
+   * - Result: [私, は, リンゴ, が, すき, です]
+   */
+  segment(text: string): string[] {
+    const words: string[] = [];
+    let pos = 0;
+    
+    while (pos < text.length) {
+      // Skip spaces in input
+      const char = text[pos];
+      if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+        pos++;
+        continue;
+      }
+      
+      // Try to find longest word match starting at current position
+      let matchLength = 0;
+      let current: TrieNode | null = this.root;
+      
+      for (let i = pos; i < text.length && current !== null; i++) {
+        const charCode = text.charCodeAt(i);
+        current = current.children.get(charCode) || null;
+        
+        if (current === null) break;
+        
+        // If this node marks end of word, it's a valid match
+        if (current.phoneme !== null) {
+          matchLength = i - pos + 1;
+        }
+      }
+      
+      if (matchLength > 0) {
+        // Found a word match - extract it
+        words.push(text.substring(pos, pos + matchLength));
+        pos += matchLength;
+      } else {
+        // No match found - this is likely a grammatical element
+        // Collect all consecutive unmatched characters as a single token
+        const grammarStart = pos;
+        
+        // Keep collecting characters until we find another word match
+        while (pos < text.length) {
+          // Skip spaces
+          const char = text[pos];
+          if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+            break;
+          }
+          
+          // Try to match a word starting from current position
+          let lookaheadMatch = 0;
+          let lookahead: TrieNode | null = this.root;
+          
+          for (let i = pos; i < text.length && lookahead !== null; i++) {
+            const charCode = text.charCodeAt(i);
+            lookahead = lookahead.children.get(charCode) || null;
+            
+            if (lookahead === null) break;
+            
+            if (lookahead.phoneme !== null) {
+              lookaheadMatch = i - pos + 1;
+            }
+          }
+          
+          // If we found a word match, stop here
+          if (lookaheadMatch > 0) {
+            break;
+          }
+          
+          // Otherwise, this character is part of the grammar sequence
+          pos++;
+        }
+        
+        // Extract the grammar token
+        if (pos > grammarStart) {
+          words.push(text.substring(grammarStart, pos));
+        }
+      }
+    }
+    
+    return words;
+  }
+}
+
+/**
+ * Convert with word segmentation support
+ */
+function convertWithSegmentation(converter: PhonemeConverter, text: string, segmenter: WordSegmenter): string {
+  // First pass: segment into words
+  const words = segmenter.segment(text);
+  
+  // Second pass: convert each word to phonemes
+  const phonemes = words.map(word => converter.convert(word));
+  
+  return phonemes.join(' ');  // Space-separated!
+}
+
+/**
+ * Convert with word segmentation and detailed information
+ */
+function convertDetailedWithSegmentation(converter: PhonemeConverter, text: string, segmenter: WordSegmenter): ConversionResult {
+  // First pass: segment into words
+  const words = segmenter.segment(text);
+  
+  // Second pass: convert each word to phonemes
+  const allMatches: Match[] = [];
+  const allUnmatched: string[] = [];
+  const phonemeParts: string[] = [];
+  let byteOffset = 0;
+  
+  for (const word of words) {
+    const wordResult = converter.convertDetailed(word);
+    
+    // Adjust match positions to account for original text position
+    for (const match of wordResult.matches) {
+      allMatches.push({
+        original: match.original,
+        phoneme: match.phoneme,
+        startIndex: match.startIndex + byteOffset,
+      });
+    }
+    
+    phonemeParts.push(wordResult.phonemes);
+    allUnmatched.push(...wordResult.unmatched);
+    byteOffset += word.length;
+  }
+  
+  return {
+    phonemes: phonemeParts.join(' '),
+    matches: allMatches,
+    unmatched: allUnmatched,
+  };
+}
+
+/**
  * Main entry point for standalone execution
  */
 async function main() {
@@ -212,6 +415,24 @@ async function main() {
   // Initialize converter and load dictionary
   const converter = new PhonemeConverter();
   await converter.loadFromJson('ja_phonemes.json');
+  
+  // Initialize word segmenter if enabled
+  let segmenter: WordSegmenter | null = null;
+  if (USE_WORD_SEGMENTATION) {
+    if (fs.existsSync('ja_words.txt')) {
+      segmenter = new WordSegmenter();
+      try {
+        segmenter.loadFromFile('ja_words.txt');
+        console.log('   💡 Word segmentation: ENABLED (spaces will separate words)');
+      } catch (e) {
+        console.error('⚠️  Warning: Could not load word dictionary:', e);
+        console.error('   Continuing without word segmentation...');
+        segmenter = null;
+      }
+    } else {
+      console.log('   💡 Word segmentation: DISABLED (ja_words.txt not found)');
+    }
+  }
   
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
   
@@ -245,7 +466,9 @@ async function main() {
         
         // Perform conversion with timing
         const startTime = performance.now();
-        const result = converter.convertDetailed(trimmed);
+        const result = segmenter
+          ? convertDetailedWithSegmentation(converter, trimmed, segmenter)
+          : converter.convertDetailed(trimmed);
         const elapsed = performance.now() - startTime;
         
         // Display results
@@ -278,7 +501,9 @@ async function main() {
     for (const text of args) {
       // Perform conversion with timing
       const startTime = performance.now();
-      const result = converter.convertDetailed(text);
+      const result = segmenter
+        ? convertDetailedWithSegmentation(converter, text, segmenter)
+        : converter.convertDetailed(text);
       const elapsed = performance.now() - startTime;
       
       // Display results

@@ -285,6 +285,202 @@ impl PhonemeConverter {
     }
 }
 
+/// Word segmenter using longest-match algorithm with word dictionary
+/// Splits Japanese text into words for better phoneme spacing
+struct WordSegmenter {
+    root: TrieNode,
+    word_count: usize,
+}
+
+impl WordSegmenter {
+    fn new() -> Self {
+        WordSegmenter {
+            root: TrieNode::default(),
+            word_count: 0,
+        }
+    }
+    
+    /// Load word list from text file (one word per line)
+    fn load_from_file(&mut self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("🔥 Loading word dictionary for segmentation...");
+        let start_time = Instant::now();
+        
+        let file = fs::File::open(file_path)?;
+        let reader = BufReader::new(file);
+        
+        for line in reader.lines() {
+            let word = line?;
+            let word = word.trim();
+            
+            if !word.is_empty() {
+                self.insert_word(word);
+                self.word_count += 1;
+                
+                if self.word_count % 50000 == 0 {
+                    print!("\r   Loaded: {} words", self.word_count);
+                    io::stdout().flush().unwrap();
+                }
+            }
+        }
+        
+        let elapsed = start_time.elapsed();
+        println!("\n✅ Loaded {} words in {}ms", self.word_count, elapsed.as_millis());
+        
+        Ok(())
+    }
+    
+    /// Insert a word into the trie
+    fn insert_word(&mut self, word: &str) {
+        let mut current = &mut self.root;
+        
+        for ch in word.chars() {
+            current = current.children
+                .entry(ch)
+                .or_insert_with(|| Box::new(TrieNode::default()));
+        }
+        
+        // Mark end of word (use empty string as marker)
+        current.phoneme = Some(String::new());
+    }
+    
+    /// Segment text into words using longest-match algorithm
+    /// 
+    /// SMART SEGMENTATION: Words are matched from dictionary, and any
+    /// unmatched sequences between words are treated as grammatical elements
+    /// (particles, conjugations, etc.) and given their own space.
+    /// 
+    /// Example: 私はリンゴがすきです
+    /// - Matches: 私, リンゴ, すき
+    /// - Grammar (unmatched): は, が, です
+    /// - Result: [私, は, リンゴ, が, すき, です]
+    fn segment(&self, text: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut pos = 0;
+        
+        while pos < chars.len() {
+            // Skip spaces in input
+            if chars[pos].is_whitespace() {
+                pos += 1;
+                continue;
+            }
+            
+            // Try to find longest word match starting at current position
+            let mut match_length = 0;
+            let mut current = &self.root;
+            
+            for i in pos..chars.len() {
+                if let Some(child) = current.children.get(&chars[i]) {
+                    current = child;
+                    
+                    // If this node marks end of word, it's a valid match
+                    if current.phoneme.is_some() {
+                        match_length = i - pos + 1;
+                    }
+                } else {
+                    break;
+                }
+            }
+            
+            if match_length > 0 {
+                // Found a word match - extract it
+                let word: String = chars[pos..pos + match_length].iter().collect();
+                words.push(word);
+                pos += match_length;
+            } else {
+                // No match found - this is likely a grammatical element
+                // Collect all consecutive unmatched characters as a single token
+                let grammar_start = pos;
+                
+                // Keep collecting characters until we find another word match
+                while pos < chars.len() {
+                    // Skip spaces
+                    if chars[pos].is_whitespace() {
+                        break;
+                    }
+                    
+                    // Try to match a word starting from current position
+                    let mut lookahead_match = 0;
+                    let mut lookahead = &self.root;
+                    
+                    for i in pos..chars.len() {
+                        if let Some(child) = lookahead.children.get(&chars[i]) {
+                            lookahead = child;
+                            
+                            if lookahead.phoneme.is_some() {
+                                lookahead_match = i - pos + 1;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // If we found a word match, stop here
+                    if lookahead_match > 0 {
+                        break;
+                    }
+                    
+                    // Otherwise, this character is part of the grammar sequence
+                    pos += 1;
+                }
+                
+                // Extract the grammar token
+                if pos > grammar_start {
+                    let grammar: String = chars[grammar_start..pos].iter().collect();
+                    words.push(grammar);
+                }
+            }
+        }
+        
+        words
+    }
+}
+
+/// Convert with word segmentation support
+fn convert_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter: &WordSegmenter) -> String {
+    // First pass: segment into words
+    let words = segmenter.segment(text);
+    
+    // Second pass: convert each word to phonemes
+    let phonemes: Vec<String> = words.iter()
+        .map(|word| converter.convert(word))
+        .collect();
+    
+    phonemes.join(" ")  // Space-separated!
+}
+
+/// Convert with word segmentation and detailed information
+fn convert_detailed_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter: &WordSegmenter) -> ConversionResult {
+    // First pass: segment into words
+    let words = segmenter.segment(text);
+    
+    // Second pass: convert each word to phonemes
+    let mut all_matches = Vec::new();
+    let mut all_unmatched = Vec::new();
+    let mut phoneme_parts = Vec::new();
+    let mut byte_offset = 0;
+    
+    for word in &words {
+        let mut word_result = converter.convert_detailed(word);
+        
+        // Adjust match positions to account for original text position
+        for match_item in &mut word_result.matches {
+            match_item.start_index += byte_offset;
+            all_matches.push(match_item.clone());
+        }
+        
+        phoneme_parts.push(word_result.phonemes);
+        all_unmatched.extend(word_result.unmatched);
+        byte_offset += word.len();
+    }
+    
+    ConversionResult {
+        phonemes: phoneme_parts.join(" "),
+        matches: all_matches,
+        unmatched: all_unmatched,
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║  Japanese → Phoneme Converter (Rust)                    ║");
@@ -301,6 +497,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize converter and load dictionary
     let mut converter = PhonemeConverter::new();
     converter.load_from_json("ja_phonemes.json")?;
+    
+    // Initialize word segmenter if enabled
+    let mut segmenter: Option<WordSegmenter> = None;
+    if USE_WORD_SEGMENTATION {
+        if std::path::Path::new("ja_words.txt").exists() {
+            let mut seg = WordSegmenter::new();
+            match seg.load_from_file("ja_words.txt") {
+                Ok(_) => {
+                    println!("   💡 Word segmentation: ENABLED (spaces will separate words)");
+                    segmenter = Some(seg);
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Warning: Could not load word dictionary: {}", e);
+                    eprintln!("   Continuing without word segmentation...");
+                }
+            }
+        } else {
+            println!("   💡 Word segmentation: DISABLED (ja_words.txt not found)");
+        }
+    }
     
     println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     
@@ -332,7 +548,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Perform conversion with timing
             let start_time = Instant::now();
-            let result = converter.convert_detailed(input);
+            let result = if let Some(ref seg) = segmenter {
+                convert_detailed_with_segmentation(&converter, input, seg)
+            } else {
+                converter.convert_detailed(input)
+            };
             let elapsed = start_time.elapsed();
             
             // Display results
@@ -368,7 +588,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for text in &args {
             // Perform conversion with timing
             let start_time = Instant::now();
-            let result = converter.convert_detailed(text);
+            let result = if let Some(ref seg) = segmenter {
+                convert_detailed_with_segmentation(&converter, text, seg)
+            } else {
+                converter.convert_detailed(text)
+            };
             let elapsed = start_time.elapsed();
             
             // Display results
