@@ -6,7 +6,8 @@ Blazing-fast Japanese text to IPA phoneme conversion. Built for speed—microsec
 
 Convert Japanese text (Hiragana/Katakana/Kanji) directly to IPA phonemes. Perfect for TTS, linguistics tools, or any project needing phonetic representations.
 
-**Data**: `ja_phonemes.json` (221k+ entries - includes all hiragana, katakana, and punctuation)  
+**Data**: `ja_phonemes.json` (221k+ entries - includes all hiragana, katakana, common kanji)  
+**Phonemes**: IPA format using tokenizer-compatible ligatures (ʥ, ʨ, ʦ, etc.)  
 **Performance**: <1ms per sentence, <50ms cold start  
 **Algorithm**: Greedy longest-match trie lookup
 
