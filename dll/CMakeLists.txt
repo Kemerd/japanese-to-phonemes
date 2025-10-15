@@ -69,15 +69,11 @@ set_target_properties(jpn_to_phoneme_ffi PROPERTIES
     # Output naming conventions
     PREFIX ""  # Remove 'lib' prefix on Unix systems for consistency
     
-    # Windows-specific: Export all symbols
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
-    
     # Position-independent code for shared libraries
     POSITION_INDEPENDENT_CODE ON
     
-    # C++ visibility for proper symbol export
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
+    # C++ visibility for proper symbol export (Unix only)
+    CXX_VISIBILITY_PRESET default
 )
 
 # Platform-specific output names
