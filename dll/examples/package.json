@@ -1,0 +1,23 @@
+{
+  "name": "jpn-phoneme-ffi-examples",
+  "version": "1.0.0",
+  "description": "Examples for using Japanese to Phoneme Converter via FFI",
+  "main": "node_example.js",
+  "scripts": {
+    "test": "node node_example.js"
+  },
+  "keywords": [
+    "japanese",
+    "phoneme",
+    "ffi",
+    "native",
+    "ipa"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ffi-napi": "^4.0.3",
+    "ref-napi": "^3.0.3"
+  }
+}
+
