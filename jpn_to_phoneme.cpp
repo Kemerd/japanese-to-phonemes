@@ -13,6 +13,14 @@
 #include <sstream>
 #include <iomanip>
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Enable word segmentation to add spaces between words in output
+// Uses ja_words.txt for Japanese word boundaries
+const bool USE_WORD_SEGMENTATION = true;
+
 // Windows-specific includes for UTF-8 console support
 #ifdef _WIN32
     #include <windows.h>
@@ -48,6 +56,13 @@
                 has_val = other.has_val;
                 if (has_val) new (&storage.val) T(other.storage.val);
             }
+            return *this;
+        }
+        
+        Optional& operator=(const T& v) {
+            if (has_val) storage.val.~T();
+            has_val = true;
+            new (&storage.val) T(v);
             return *this;
         }
         
@@ -403,6 +418,269 @@ public:
     }
 };
 
+/**
+ * Word segmenter using longest-match algorithm with word dictionary
+ * Splits Japanese text into words for better phoneme spacing
+ */
+class WordSegmenter {
+private:
+    std::unique_ptr<TrieNode> root;
+    size_t word_count;
+    
+    // Helper to extract UTF-8 code point from string
+    uint32_t get_code_point(const std::string& str, size_t& pos) const {
+        unsigned char c = str[pos];
+        
+        if (c < 0x80) {
+            pos++;
+            return c;
+        } else if ((c & 0xE0) == 0xC0) {
+            uint32_t cp = ((c & 0x1F) << 6) | (str[pos + 1] & 0x3F);
+            pos += 2;
+            return cp;
+        } else if ((c & 0xF0) == 0xE0) {
+            uint32_t cp = ((c & 0x0F) << 12) | ((str[pos + 1] & 0x3F) << 6) | (str[pos + 2] & 0x3F);
+            pos += 3;
+            return cp;
+        } else if ((c & 0xF8) == 0xF0) {
+            uint32_t cp = ((c & 0x07) << 18) | ((str[pos + 1] & 0x3F) << 12) | 
+                         ((str[pos + 2] & 0x3F) << 6) | (str[pos + 3] & 0x3F);
+            pos += 4;
+            return cp;
+        }
+        
+        pos++;
+        return c;
+    }
+
+public:
+    WordSegmenter() : root(std::make_unique<TrieNode>()), word_count(0) {}
+    
+    /**
+     * Load word list from text file (one word per line)
+     * Builds trie for fast longest-match word segmentation
+     */
+    void load_from_file(const std::string& file_path) {
+        std::ifstream file(file_path);
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open word file: " + file_path);
+        }
+        
+        std::cout << "🔥 Loading word dictionary for segmentation..." << std::endl;
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        std::string word;
+        while (std::getline(file, word)) {
+            // Remove trailing whitespace/newlines
+            while (!word.empty() && (word.back() == '\r' || word.back() == '\n' || word.back() == ' ')) {
+                word.pop_back();
+            }
+            
+            if (!word.empty()) {
+                insert_word(word);
+                word_count++;
+                
+                if (word_count % 50000 == 0) {
+                    std::cout << "\r   Loaded: " << word_count << " words" << std::flush;
+                }
+            }
+        }
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        
+        std::cout << "\n✅ Loaded " << word_count << " words in " << elapsed << "ms" << std::endl;
+    }
+    
+    /**
+     * Insert a word into the trie
+     */
+    void insert_word(const std::string& word) {
+        TrieNode* current = root.get();
+        
+        size_t pos = 0;
+        while (pos < word.length()) {
+            uint32_t code_point = get_code_point(word, pos);
+            
+            if (current->children.find(code_point) == current->children.end()) {
+                current->children[code_point] = std::make_unique<TrieNode>();
+            }
+            current = current->children[code_point].get();
+        }
+        
+        // Mark end of word (use empty string as marker)
+        std::string empty_marker = "";
+        current->phoneme = empty_marker;
+    }
+    
+    /**
+     * Segment text into words using longest-match algorithm
+     * SMART SEGMENTATION: Words are matched from dictionary, and any
+     * unmatched sequences between words are treated as grammatical elements
+     * (particles, conjugations, etc.) and given their own space.
+     * 
+     * Example: 私はリンゴがすきです
+     * - Matches: 私, リンゴ, すき
+     * - Grammar (unmatched): は, が, です
+     * - Result: [私] [は] [リンゴ] [が] [すき] [です]
+     */
+    std::vector<std::string> segment(const std::string& text) {
+        std::vector<std::string> words;
+        
+        // Pre-decode UTF-8 to code points for speed
+        std::vector<uint32_t> chars;
+        std::vector<size_t> byte_positions;
+        size_t byte_pos = 0;
+        
+        while (byte_pos < text.length()) {
+            byte_positions.push_back(byte_pos);
+            chars.push_back(get_code_point(text, byte_pos));
+        }
+        byte_positions.push_back(byte_pos);
+        
+        size_t pos = 0;
+        while (pos < chars.size()) {
+            // Skip spaces in input
+            uint32_t cp = chars[pos];
+            if (cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r') {
+                pos++;
+                continue;
+            }
+            
+            // Try to find longest word match starting at current position
+            size_t match_length = 0;
+            TrieNode* current = root.get();
+            
+            for (size_t i = pos; i < chars.size() && current != nullptr; i++) {
+                auto it = current->children.find(chars[i]);
+                if (it == current->children.end()) {
+                    break;
+                }
+                
+                current = it->second.get();
+                
+                // If this node marks end of word, it's a valid match
+                if (current->phoneme.has_value()) {
+                    match_length = i - pos + 1;
+                }
+            }
+            
+            if (match_length > 0) {
+                // Found a word match - extract it
+                size_t start_byte = byte_positions[pos];
+                size_t end_byte = byte_positions[pos + match_length];
+                words.push_back(text.substr(start_byte, end_byte - start_byte));
+                pos += match_length;
+            } else {
+                // No match found - this is likely a grammatical element
+                // Collect all consecutive unmatched characters as a single token
+                // This handles particles (は、が、を), conjugations (です、ます), etc.
+                size_t grammar_start = pos;
+                size_t grammar_length = 0;
+                
+                // Keep collecting characters until we find another word match
+                while (pos < chars.size()) {
+                    // Skip spaces
+                    if (chars[pos] == ' ' || chars[pos] == '\t' || chars[pos] == '\n' || chars[pos] == '\r') {
+                        break;
+                    }
+                    
+                    // Try to match a word starting from current position
+                    size_t lookahead_match = 0;
+                    TrieNode* lookahead = root.get();
+                    
+                    for (size_t i = pos; i < chars.size() && lookahead != nullptr; i++) {
+                        auto it = lookahead->children.find(chars[i]);
+                        if (it == lookahead->children.end()) {
+                            break;
+                        }
+                        lookahead = it->second.get();
+                        if (lookahead->phoneme.has_value()) {
+                            lookahead_match = i - pos + 1;
+                        }
+                    }
+                    
+                    // If we found a word match, stop here
+                    if (lookahead_match > 0) {
+                        break;
+                    }
+                    
+                    // Otherwise, this character is part of the grammar sequence
+                    grammar_length++;
+                    pos++;
+                }
+                
+                // Extract the grammar token
+                if (grammar_length > 0) {
+                    size_t start_byte = byte_positions[grammar_start];
+                    size_t end_byte = byte_positions[grammar_start + grammar_length];
+                    words.push_back(text.substr(start_byte, end_byte - start_byte));
+                }
+            }
+        }
+        
+        return words;
+    }
+};
+
+/**
+ * Helper functions for PhonemeConverter with word segmentation
+ * Defined here after WordSegmenter class is complete
+ */
+namespace SegmentedConversion {
+    /**
+     * Convert with word segmentation support
+     * Two-pass algorithm: 1) segment into words, 2) convert each word
+     * Returns phonemes with spaces between words
+     */
+    std::string convert_with_segmentation(PhonemeConverter& converter, const std::string& japanese_text, WordSegmenter& segmenter) {
+        // First pass: segment into words
+        auto words = segmenter.segment(japanese_text);
+        
+        // Second pass: convert each word to phonemes
+        std::string result;
+        for (size_t i = 0; i < words.size(); i++) {
+            if (i > 0) result += " ";  // Add space between words
+            result += converter.convert(words[i]);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Convert with word segmentation and detailed information
+     */
+    ConversionResult convert_detailed_with_segmentation(PhonemeConverter& converter, const std::string& japanese_text, WordSegmenter& segmenter) {
+        // First pass: segment into words
+        auto words = segmenter.segment(japanese_text);
+        
+        // Second pass: convert each word to phonemes
+        ConversionResult result;
+        size_t byte_offset = 0;
+        
+        for (size_t i = 0; i < words.size(); i++) {
+            if (i > 0) result.phonemes += " ";  // Add space between words
+            
+            auto word_result = converter.convert_detailed(words[i]);
+            
+            // Adjust match positions to account for original text position
+            for (auto& match : word_result.matches) {
+                match.start_index += byte_offset;
+                result.matches.push_back(match);
+            }
+            
+            result.phonemes += word_result.phonemes;
+            result.unmatched.insert(result.unmatched.end(), 
+                                   word_result.unmatched.begin(), 
+                                   word_result.unmatched.end());
+            
+            byte_offset += words[i].length();
+        }
+        
+        return result;
+    }
+}
+
 // Helper function to get UTF-8 command line arguments on Windows
 #ifdef _WIN32
 std::vector<std::string> get_utf8_args() {
@@ -454,6 +732,26 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Initialize word segmenter if enabled
+    std::unique_ptr<WordSegmenter> segmenter;
+    if (USE_WORD_SEGMENTATION) {
+        std::ifstream test_word_file("ja_words.txt");
+        if (test_word_file.good()) {
+            test_word_file.close();
+            segmenter = std::make_unique<WordSegmenter>();
+            try {
+                segmenter->load_from_file("ja_words.txt");
+                std::cout << "   💡 Word segmentation: ENABLED (spaces will separate words)" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "⚠️  Warning: Could not load word dictionary: " << e.what() << std::endl;
+                std::cerr << "   Continuing without word segmentation..." << std::endl;
+                segmenter.reset();
+            }
+        } else {
+            std::cout << "   💡 Word segmentation: DISABLED (ja_words.txt not found)" << std::endl;
+        }
+    }
+    
     std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" << std::endl;
     
     // Get UTF-8 arguments on Windows
@@ -483,7 +781,12 @@ int main(int argc, char* argv[]) {
             
             // Perform conversion with timing
             auto start_time = std::chrono::high_resolution_clock::now();
-            auto result = converter.convert_detailed(input);
+            ConversionResult result;
+            if (segmenter) {
+                result = SegmentedConversion::convert_detailed_with_segmentation(converter, input, *segmenter);
+            } else {
+                result = converter.convert_detailed(input);
+            }
             auto end_time = std::chrono::high_resolution_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
             
@@ -523,7 +826,12 @@ int main(int argc, char* argv[]) {
             
             // Perform conversion with timing
             auto start_time = std::chrono::high_resolution_clock::now();
-            auto result = converter.convert_detailed(text);
+            ConversionResult result;
+            if (segmenter) {
+                result = SegmentedConversion::convert_detailed_with_segmentation(converter, text, *segmenter);
+            } else {
+                result = converter.convert_detailed(text);
+            }
             auto end_time = std::chrono::high_resolution_clock::now();
             auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
             auto elapsed_ms = elapsed_us / 1000.0;

@@ -7,8 +7,16 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Write, BufRead, BufReader};
 use std::time::Instant;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Enable word segmentation to add spaces between words in output
+// Uses ja_words.txt for Japanese word boundaries
+const USE_WORD_SEGMENTATION: bool = true;
 
 /// High-performance trie node for phoneme lookup
 /// Uses HashMap for O(1) character access

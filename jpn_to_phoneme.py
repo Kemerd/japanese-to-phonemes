@@ -12,6 +12,14 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import io
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIGURATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Enable word segmentation to add spaces between words in output
+# Uses ja_words.txt for Japanese word boundaries
+USE_WORD_SEGMENTATION = True
+
 # Force UTF-8 encoding for Windows console
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -200,6 +208,173 @@ class PhonemeConverter:
         )
 
 
+class WordSegmenter:
+    """
+    Word segmenter using longest-match algorithm with word dictionary
+    Splits Japanese text into words for better phoneme spacing
+    
+    SMART SEGMENTATION: Words are matched from dictionary, and any
+    unmatched sequences between words are treated as grammatical elements
+    (particles, conjugations, etc.) and given their own space.
+    """
+    
+    def __init__(self):
+        self.root = TrieNode()
+        self.word_count = 0
+    
+    def load_from_file(self, file_path: str) -> None:
+        """Load word list from text file (one word per line)"""
+        print('🔥 Loading word dictionary for segmentation...')
+        start_time = time.perf_counter()
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                word = line.strip()
+                if word:
+                    self._insert_word(word)
+                    self.word_count += 1
+                    
+                    if self.word_count % 50000 == 0:
+                        print(f'\r   Loaded: {self.word_count} words', end='', flush=True)
+        
+        elapsed = (time.perf_counter() - start_time) * 1000
+        print(f'\n✅ Loaded {self.word_count} words in {elapsed:.0f}ms')
+    
+    def _insert_word(self, word: str) -> None:
+        """Insert a word into the trie"""
+        current = self.root
+        
+        for char in word:
+            char_code = ord(char)
+            if char_code not in current.children:
+                current.children[char_code] = TrieNode()
+            current = current.children[char_code]
+        
+        # Mark end of word (use empty string as marker)
+        current.phoneme = ""
+    
+    def segment(self, text: str) -> List[str]:
+        """
+        Segment text into words using longest-match algorithm
+        
+        Example: 私はリンゴがすきです
+        - Matches: 私, リンゴ, すき
+        - Grammar (unmatched): は, が, です
+        - Result: [私, は, リンゴ, が, すき, です]
+        """
+        words = []
+        pos = 0
+        
+        while pos < len(text):
+            # Skip spaces in input
+            if text[pos] in ' \t\n\r':
+                pos += 1
+                continue
+            
+            # Try to find longest word match starting at current position
+            match_length = 0
+            current = self.root
+            
+            i = pos
+            while i < len(text) and current is not None:
+                char_code = ord(text[i])
+                current = current.children.get(char_code)
+                
+                if current is None:
+                    break
+                
+                # If this node marks end of word, it's a valid match
+                if current.phoneme is not None:
+                    match_length = i - pos + 1
+                
+                i += 1
+            
+            if match_length > 0:
+                # Found a word match - extract it
+                words.append(text[pos:pos + match_length])
+                pos += match_length
+            else:
+                # No match found - this is likely a grammatical element
+                # Collect all consecutive unmatched characters as a single token
+                grammar_start = pos
+                
+                # Keep collecting characters until we find another word match
+                while pos < len(text):
+                    # Skip spaces
+                    if text[pos] in ' \t\n\r':
+                        break
+                    
+                    # Try to match a word starting from current position
+                    lookahead_match = 0
+                    lookahead = self.root
+                    
+                    for i in range(pos, len(text)):
+                        char_code = ord(text[i])
+                        lookahead = lookahead.children.get(char_code)
+                        
+                        if lookahead is None:
+                            break
+                        
+                        if lookahead.phoneme is not None:
+                            lookahead_match = i - pos + 1
+                    
+                    # If we found a word match, stop here
+                    if lookahead_match > 0:
+                        break
+                    
+                    # Otherwise, this character is part of the grammar sequence
+                    pos += 1
+                
+                # Extract the grammar token
+                if pos > grammar_start:
+                    words.append(text[grammar_start:pos])
+        
+        return words
+
+
+def convert_with_segmentation(converter: PhonemeConverter, text: str, segmenter: WordSegmenter) -> str:
+    """Convert with word segmentation support"""
+    # First pass: segment into words
+    words = segmenter.segment(text)
+    
+    # Second pass: convert each word to phonemes
+    result = []
+    for word in words:
+        result.append(converter.convert(word))
+    
+    return ' '.join(result)  # Space-separated!
+
+
+def convert_detailed_with_segmentation(converter: PhonemeConverter, text: str, segmenter: WordSegmenter) -> ConversionResult:
+    """Convert with word segmentation and detailed information"""
+    # First pass: segment into words
+    words = segmenter.segment(text)
+    
+    # Second pass: convert each word to phonemes
+    all_matches = []
+    all_unmatched = []
+    phoneme_parts = []
+    byte_offset = 0
+    
+    for word in words:
+        word_result = converter.convert_detailed(word)
+        
+        # Adjust match positions to account for original text position
+        for match in word_result.matches:
+            match.start_index += byte_offset
+            all_matches.append(match)
+        
+        phoneme_parts.append(word_result.phonemes)
+        all_unmatched.extend(word_result.unmatched)
+        byte_offset += len(word)
+    
+    return ConversionResult(
+        phonemes=' '.join(phoneme_parts),
+        matches=all_matches,
+        unmatched=all_unmatched,
+    )
+
+
 def main():
     """Main entry point for standalone execution"""
     print('╔══════════════════════════════════════════════════════════╗')
@@ -217,6 +392,22 @@ def main():
     # Initialize converter and load dictionary
     converter = PhonemeConverter()
     converter.load_from_json('ja_phonemes.json')
+    
+    # Initialize word segmenter if enabled
+    segmenter = None
+    if USE_WORD_SEGMENTATION:
+        import os
+        if os.path.exists('ja_words.txt'):
+            segmenter = WordSegmenter()
+            try:
+                segmenter.load_from_file('ja_words.txt')
+                print('   💡 Word segmentation: ENABLED (spaces will separate words)')
+            except Exception as e:
+                print(f'⚠️  Warning: Could not load word dictionary: {e}')
+                print('   Continuing without word segmentation...')
+                segmenter = None
+        else:
+            print('   💡 Word segmentation: DISABLED (ja_words.txt not found)')
     
     print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
     
@@ -241,7 +432,10 @@ def main():
                 
                 # Perform conversion with timing
                 start_time = time.perf_counter()
-                result = converter.convert_detailed(text)
+                if segmenter:
+                    result = convert_detailed_with_segmentation(converter, text, segmenter)
+                else:
+                    result = converter.convert_detailed(text)
                 elapsed = (time.perf_counter() - start_time) * 1_000_000
                 
                 # Display results
@@ -269,7 +463,10 @@ def main():
         for text in args:
             # Perform conversion with timing
             start_time = time.perf_counter()
-            result = converter.convert_detailed(text)
+            if segmenter:
+                result = convert_detailed_with_segmentation(converter, text, segmenter)
+            else:
+                result = converter.convert_detailed(text)
             elapsed_us = (time.perf_counter() - start_time) * 1_000_000
             elapsed_ms = elapsed_us / 1000
             
