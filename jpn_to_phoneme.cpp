@@ -10,8 +10,45 @@
 #include <vector>
 #include <chrono>
 #include <memory>
-#include <optional>
 #include <sstream>
+#include <iomanip>
+
+// Check for optional support (C++17)
+#if __cplusplus >= 201703L && __has_include(<optional>)
+    #include <optional>
+    template<typename T>
+    using Optional = std::optional<T>;
+#else
+    // Fallback implementation for older compilers
+    template<typename T>
+    class Optional {
+    private:
+        bool has_val;
+        union { T value; };
+    public:
+        Optional() : has_val(false) {}
+        Optional(const T& v) : has_val(true), value(v) {}
+        Optional(const Optional& other) : has_val(other.has_val) {
+            if (has_val) new (&value) T(other.value);
+        }
+        ~Optional() { if (has_val) value.~T(); }
+        
+        Optional& operator=(const Optional& other) {
+            if (this != &other) {
+                if (has_val) value.~T();
+                has_val = other.has_val;
+                if (has_val) new (&value) T(other.value);
+            }
+            return *this;
+        }
+        
+        bool has_value() const { return has_val; }
+        T& operator*() { return value; }
+        const T& operator*() const { return value; }
+        T* operator->() { return &value; }
+        const T* operator->() const { return &value; }
+    };
+#endif
 
 // JSON parsing - simple implementation for our use case
 #include <regex>
@@ -26,7 +63,7 @@ public:
     std::unordered_map<uint32_t, std::unique_ptr<TrieNode>> children;
     
     // Phoneme value if this node represents end of a word
-    std::optional<std::string> phoneme;
+    Optional<std::string> phoneme;
 };
 
 /**
@@ -216,7 +253,7 @@ public:
         while (pos < japanese_text.length()) {
             // Try to find longest match starting at current position
             size_t match_length = 0;
-            std::optional<std::string> matched_phoneme;
+            Optional<std::string> matched_phoneme;
             
             TrieNode* current = root.get();
             size_t temp_pos = pos;
@@ -263,7 +300,7 @@ public:
         
         while (pos < japanese_text.length()) {
             size_t match_length = 0;
-            std::optional<std::string> matched_phoneme;
+            Optional<std::string> matched_phoneme;
             
             TrieNode* current = root.get();
             size_t temp_pos = pos;

@@ -6,6 +6,7 @@
 
 import * as fs from 'fs';
 import * as readline from 'readline';
+import { performance } from 'perf_hooks';
 
 /**
  * High-performance trie node for phoneme lookup

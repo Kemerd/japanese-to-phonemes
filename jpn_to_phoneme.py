@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Japanese to Phoneme Converter - Python Edition
 Blazing fast IPA phoneme conversion using optimized trie structure
@@ -9,6 +10,12 @@ import sys
 import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+import io
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
 @dataclass
