@@ -1656,18 +1656,17 @@ int main(int argc, char* argv[]) {
     // Initialize converter and load dictionary
     // 🚀 Try binary trie first (100x faster!), fallback to JSON
     PhonemeConverter converter;
-    bool loaded = false;
+    bool loaded_binary = false;
     
     // Try simple binary format (direct load into TrieNode*)
     if (converter.try_load_binary_format("japanese.trie")) {
-        loaded = true;
+        loaded_binary = true;
         std::cout << "   💡 Binary format loaded directly into TrieNode*" << std::endl;
     } else {
         // Fallback to JSON
         std::cout << "   ⚠️  Binary trie not found, loading JSON..." << std::endl;
         try {
             converter.load_from_json("ja_phonemes.json");
-            loaded = true;
         } catch (const std::exception& e) {
             std::cerr << "❌ Error loading dictionary: " << e.what() << std::endl;
             return 1;
@@ -1677,12 +1676,16 @@ int main(int argc, char* argv[]) {
     // Initialize word segmenter if enabled
     std::unique_ptr<WordSegmenter> segmenter;
     if (USE_WORD_SEGMENTATION) {
-        // If using binary format, words are already loaded!
-        if (loaded) {
+        // If using binary format, words are already loaded in converter's trie!
+        // We still need to create a WordSegmenter that uses the converter's trie
+        if (loaded_binary) {
             std::cout << "   💡 Word segmentation: Words already in TrieNode* from binary format" << std::endl;
-            // Word entries (with empty phoneme values) are already in the trie
+            // Create a WordSegmenter - it will use converter's trie as phoneme fallback
+            // The segmentation will work because segment_from_segments() uses phoneme_root fallback
+            segmenter = std::make_unique<WordSegmenter>();
+            // Don't load ja_words.txt - words are already in converter's trie
         } else {
-            // Load separate word file
+            // Load separate word file for JSON mode
             std::ifstream test_word_file("ja_words.txt");
             if (test_word_file.good()) {
                 test_word_file.close();
