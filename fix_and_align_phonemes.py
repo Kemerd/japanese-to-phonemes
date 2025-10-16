@@ -780,63 +780,63 @@ def serialize_trie_node(node, output, offset_tracker):
     return node_offset
 
 
-def build_binary_trie(phoneme_dict, word_set, output_path):
+def build_simple_binary_format(phoneme_dict, word_set, output_path):
     """
-    Build a unified binary trie containing both phonemes and words.
+    Build a SIMPLE binary format that C++ can load DIRECTLY into TrieNode* structure.
+    Just serialized key-value pairs - no complex tree traversal needed!
     
-    Args:
-        phoneme_dict: Dictionary of {text: phoneme}
-        word_set: Set of words (will be marked with empty string values)
-        output_path: Path to write the .trie file
+    Format:
+    - Magic: "JPHO" (4 bytes)
+    - Version: 1.0 (2 bytes + 2 bytes)
+    - Entry count: uint32
+    - For each entry:
+      - Key length: varint
+      - Key: UTF-8 bytes
+      - Value length: varint  
+      - Value: UTF-8 bytes
+    
+    C++ loads this into TrieNode* structure using same insert() logic as JSON!
     """
-    print(f"\n>> Building unified binary trie...")
+    print(f"\n>> Building simple binary format (direct load into TrieNode*)...")
     
-    # Create root node
-    root = TrieNodeBuilder()
-    
-    # Insert phoneme entries
-    print(f"   Inserting {len(phoneme_dict)} phoneme entries...")
-    for idx, (text, phoneme) in enumerate(phoneme_dict.items()):
-        root.insert(text, phoneme)
-        if idx % 50000 == 0 and idx > 0:
-            print(f"\r   Phonemes: {idx}/{len(phoneme_dict)}", end='', flush=True)
-    print(f"\r   Phonemes: {len(phoneme_dict)}/{len(phoneme_dict)} [OK]")
-    
-    # Insert word entries (with empty value as marker)
-    # Only add words that aren't already phoneme entries to avoid duplicates
-    word_only_count = 0
-    print(f"   Inserting {len(word_set)} word entries...")
-    for idx, word in enumerate(word_set):
-        if word not in phoneme_dict:
-            root.insert(word, "")  # Empty string marks word existence
-            word_only_count += 1
-        if idx % 50000 == 0 and idx > 0:
-            print(f"\r   Words: {idx}/{len(word_set)} ({word_only_count} unique)", end='', flush=True)
-    print(f"\r   Words: {len(word_set)}/{len(word_set)} ({word_only_count} unique) [OK]")
-    
-    # Serialize to binary
-    print(f"   Serializing trie to binary format...")
     output = bytearray()
     
-    # Write header
-    # Magic number: "JPNT" (Japanese Phoneme/Name Trie)
-    output.extend(b'JPNT')
+    # Header
+    output.extend(b'JPHO')  # Magic: Japanese PHOnemes
+    output.extend(struct.pack('<HH', 1, 0))  # Version 1.0
     
-    # Version: 2.0 (optimized format with varints and relative offsets)
-    output.extend(struct.pack('<H', 2))  # Major version
-    output.extend(struct.pack('<H', 0))  # Minor version
+    # Combine phonemes and words (words have empty values)
+    all_entries = {}
+    all_entries.update(phoneme_dict)
     
-    # Entry counts
-    output.extend(struct.pack('<I', len(phoneme_dict)))  # Phoneme entries
-    output.extend(struct.pack('<I', len(word_set)))       # Word entries
+    # Add word-only entries (not in phoneme dict)
+    for word in word_set:
+        if word not in all_entries:
+            all_entries[word] = ""  # Empty marker for words
     
-    # Root node offset (will be right after header)
-    root_offset = len(output)
-    output.extend(struct.pack('<Q', root_offset))  # 8 bytes: root offset
+    # Write entry count
+    entry_count = len(all_entries)
+    output.extend(struct.pack('<I', entry_count))
     
-    # Serialize the trie
-    offset_tracker = {'next': root_offset}
-    serialize_trie_node(root, output, offset_tracker)
+    print(f"   Serializing {entry_count} entries...")
+    
+    # Write all entries
+    for idx, (key, value) in enumerate(all_entries.items()):
+        key_bytes = key.encode('utf-8')
+        value_bytes = value.encode('utf-8')
+        
+        # Key length + key
+        write_varint(output, len(key_bytes))
+        output.extend(key_bytes)
+        
+        # Value length + value
+        write_varint(output, len(value_bytes))
+        output.extend(value_bytes)
+        
+        if idx % 50000 == 0 and idx > 0:
+            print(f"\r   Progress: {idx}/{entry_count}", end='', flush=True)
+    
+    print(f"\r   Progress: {entry_count}/{entry_count} [OK]")
     
     # Write to file
     print(f"   Writing to {output_path}...")
@@ -846,9 +846,10 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
     file_size = len(output)
     file_size_mb = file_size / (1024 * 1024)
     
-    print(f"   [OK] Binary trie created!")
+    print(f"   [OK] Binary format created!")
     print(f"   Size: {file_size:,} bytes ({file_size_mb:.2f} MB)")
-    print(f"   Entries: {len(phoneme_dict)} phonemes + {word_only_count} words")
+    print(f"   Entries: {entry_count} (phonemes + words)")
+    print(f"   ⚡ C++ loads this DIRECTLY into TrieNode* using same insert() as JSON!")
     
     return output_path
 
@@ -1059,12 +1060,12 @@ def main():
     with open('ja_phonemes.json', 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    # Step 6: Build unified binary trie
-    print(f"\nStep 6: Building binary trie format...")
+    # Step 6: Build simple binary format (DIRECT load into TrieNode*)
+    print(f"\nStep 6: Building simple binary format...")
     if os.path.exists(words_source):
-        build_binary_trie(data, word_set, 'japanese.trie')
+        build_simple_binary_format(data, word_set, 'japanese.trie')
     else:
-        print(f"   [WARN] Skipping binary trie (word list not available)")
+        print(f"   [WARN] Skipping binary format (word list not available)")
     
     print(f"\n[COMPLETE] Done!")
     print(f"\nSummary:")
@@ -1082,10 +1083,10 @@ def main():
     print(f"   - ja_phonemes.json (phoneme dictionary)")
     if os.path.exists(words_source):
         print(f"   - ja_words.txt (word segmentation dictionary)")
-        print(f"   - japanese.trie (binary trie - FAST loading!)")
+        print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
     print(f"\nNote: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
-    print(f"Note: Use japanese.trie for 100x faster loading in C++!")
+    print(f"Note: Use japanese.trie for instant C++ loading (same TrieNode* structure as JSON)!")
 
 if __name__ == '__main__':
     main()
