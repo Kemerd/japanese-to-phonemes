@@ -898,22 +898,34 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         };
         
         // Search backwards to find the start of the kanji/word that has furigana
-        // Stop when we hit kana or punctuation (that marks the boundary)
+        // 🔥 SMART OKURIGANA DETECTION:
+        // - その男「おとこ」 → Stop at kana prefix "その", capture only "男"  
+        // - 昼ご飯「ひるごはん」 → Keep kana "ご" sandwiched between kanji, capture all "昼ご飯"
+        // Algorithm: Scan backward collecting chars. Stop at first kana that's followed (backward) by only more kana.
+        
+        // First pass: Find the last non-kana (kanji) character before the bracket
+        size_t last_kanji_pos = bracket_open;
+        while (last_kanji_pos > pos && is_kana_cp(chars[last_kanji_pos - 1])) {
+            last_kanji_pos--;
+        }
+        
+        if (last_kanji_pos > pos) {
+            last_kanji_pos--;  // Now pointing at the last kanji
+        }
+        
+        // Second pass: From last kanji, search backward for word boundary
+        // Include okurigana (kana between kanji), but stop at kana-only prefix
+        word_start = last_kanji_pos;
+        search_pos = last_kanji_pos;
+        
         while (search_pos > pos) {
             search_pos--;
             uint32_t cp = chars[search_pos];
             
-            // Check if this is hiragana or katakana - this marks word boundary
-            if (is_kana_cp(cp)) {
-                // Kana found - word starts AFTER this character
-                word_start = search_pos + 1;
-                break;
-            }
-            
-            // Check for Japanese punctuation boundaries (using code points)
-            if (cp == 0x300D ||  // 」 closing bracket
+            // Check for punctuation boundaries first (these always stop us)
+            if (cp == 0x300D ||  // 」 closing bracket (another furigana hint)
                 cp == 0x3001 ||  // 、 Japanese comma
-                cp == 0x3002 ||  // 。 Japanese period
+                cp == 0x3002 ||  // 。 Japanese period  
                 cp == 0xFF01 ||  // ！ full-width exclamation
                 cp == 0xFF1F ||  // ？ full-width question
                 cp == 0xFF09 ||  // ） full-width right paren
@@ -932,7 +944,32 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 break;
             }
             
-            // If we've searched all the way back to pos, the word starts at pos
+            // Check if this is kana
+            bool is_kana_char = is_kana_cp(cp);
+            
+            if (is_kana_char) {
+                // Check if there's ANY non-kana (kanji) before this position
+                bool has_kanji_before = false;
+                for (size_t check_pos = search_pos; check_pos > pos; check_pos--) {
+                    if (!is_kana_cp(chars[check_pos - 1])) {
+                        // Check it's not punctuation
+                        uint32_t check_cp = chars[check_pos - 1];
+                        if (check_cp >= 0x4E00 || (check_cp >= 0x3400 && check_cp <= 0x9FFF)) {  // CJK kanji ranges
+                            has_kanji_before = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!has_kanji_before) {
+                    // This kana is not sandwiched - it's a prefix word → stop here
+                    word_start = search_pos + 1;
+                    break;
+                }
+                // Otherwise, this kana is sandwiched (okurigana) → continue
+            }
+            
+            // Update word_start to include this character
             word_start = search_pos;
         }
         
