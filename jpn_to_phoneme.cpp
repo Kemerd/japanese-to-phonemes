@@ -1023,11 +1023,13 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 }
             }
             
-            // If we found a compound word, use it instead of the furigana hint
+            // If we found a compound word, use it with the furigana reading replacing the kanji
+            // This ensures that 来「き」た becomes "きた" not "来た" for phoneme conversion
             if (match_length > 0) {
                 size_t compound_end_byte = byte_positions[after_bracket + match_length];
-                std::string compound = kanji + text.substr(byte_positions[after_bracket], 
-                                                          compound_end_byte - byte_positions[after_bracket]);
+                // 🔥 KEY FIX: Use the furigana READING instead of kanji!
+                std::string compound = reading + text.substr(byte_positions[after_bracket], 
+                                                             compound_end_byte - byte_positions[after_bracket]);
                 segments.push_back(TextSegment(compound, kanji_start_byte));
                 pos = after_bracket + match_length;
                 used_compound = true;
@@ -1070,11 +1072,17 @@ namespace SegmentedConversion {
         // Furigana segments are treated as atomic units
         auto words = segmenter.segment_from_segments(segments, converter.get_root());
         
-        // 🔥 STEP 3: Convert each word to phonemes
+        // 🔥 STEP 3: Convert each word to phonemes with particle handling
         std::string result;
         for (size_t i = 0; i < words.size(); i++) {
             if (i > 0) result += " ";  // Add space between words
-            result += converter.convert(words[i]);
+            
+            // Special handling for the topic particle は → "wa"
+            if (words[i] == "は" || words[i] == "\xe3\x81\xaf") {  // は in UTF-8
+                result += "wa";
+            } else {
+                result += converter.convert(words[i]);
+            }
         }
         
         return result;
@@ -1092,25 +1100,36 @@ namespace SegmentedConversion {
         // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
         auto words = segmenter.segment_from_segments(segments, converter.get_root());
         
-        // 🔥 STEP 3: Convert each word to phonemes
+        // 🔥 STEP 3: Convert each word to phonemes with particle handling
         ConversionResult result;
         size_t byte_offset = 0;
         
         for (size_t i = 0; i < words.size(); i++) {
             if (i > 0) result.phonemes += " ";  // Add space between words
             
-            auto word_result = converter.convert_detailed(words[i]);
-            
-            // Adjust match positions to account for original text position
-            for (auto& match : word_result.matches) {
-                match.start_index += byte_offset;
+            // Special handling for the topic particle は → "wa"
+            if (words[i] == "は" || words[i] == "\xe3\x81\xaf") {  // は in UTF-8
+                result.phonemes += "wa";
+                // Add to matches for consistency
+                Match match;
+                match.original = words[i];
+                match.phoneme = "wa";
+                match.start_index = byte_offset;
                 result.matches.push_back(match);
+            } else {
+                auto word_result = converter.convert_detailed(words[i]);
+                
+                // Adjust match positions to account for original text position
+                for (auto& match : word_result.matches) {
+                    match.start_index += byte_offset;
+                    result.matches.push_back(match);
+                }
+                
+                result.phonemes += word_result.phonemes;
+                result.unmatched.insert(result.unmatched.end(), 
+                                       word_result.unmatched.begin(), 
+                                       word_result.unmatched.end());
             }
-            
-            result.phonemes += word_result.phonemes;
-            result.unmatched.insert(result.unmatched.end(), 
-                                   word_result.unmatched.begin(), 
-                                   word_result.unmatched.end());
             
             byte_offset += words[i].length();
         }

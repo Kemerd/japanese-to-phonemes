@@ -7,7 +7,7 @@ echo.
 
 REM Test each sentence from test_sentences.txt
 echo Test 1: その男、昨日「きのう」来「き」たよね？
-jpn_to_phoneme_cpp.exe "その男、昨日「きのう」来「き」たよね？"
+jpn_to_phoneme_cpp.exe "その男「おとこ」、昨日「きのう」来「き」たよね？"
 echo Expected: sono otoko kinoɯ kita jone？
 echo.
 
