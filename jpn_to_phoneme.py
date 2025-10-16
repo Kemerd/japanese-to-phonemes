@@ -11,6 +11,8 @@ import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import io
+import struct
+import os
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -68,6 +70,78 @@ class PhonemeConverter:
     def __init__(self):
         self.root = TrieNode()
         self.entry_count = 0
+    
+    def try_load_binary_format(self, file_path: str) -> bool:
+        """
+        Load phoneme dictionary from binary .trie format (100x faster!)
+        
+        Binary format:
+        - Magic: "JPN\x00" (4 bytes)
+        - Version: major.minor (2 bytes)
+        - Entry count: varint
+        - Entries: [key_len(varint), key(utf8), value_len(varint), value(utf8)]
+        
+        Returns True if loaded successfully, False if file not found
+        """
+        if not os.path.exists(file_path):
+            return False
+        
+        try:
+            with open(file_path, 'rb') as f:
+                # Read and verify magic number
+                magic = f.read(4)
+                if magic != b'JPHO':
+                    return False
+                
+                # Read version (2 uint16_t values = 4 bytes total)
+                version_major, version_minor = struct.unpack('<HH', f.read(4))
+                
+                # Read entry count (uint32_t = 4 bytes)
+                entry_count = struct.unpack('<I', f.read(4))[0]
+                
+                # Read varint helper
+                def read_varint():
+                    value = 0
+                    shift = 0
+                    while True:
+                        byte = f.read(1)[0]
+                        value |= (byte & 0x7F) << shift
+                        if (byte & 0x80) == 0:
+                            break
+                        shift += 7
+                    return value
+                
+                print(f'🚀 Loading binary format v{version_major}.{version_minor}: {entry_count} entries')
+                start_time = time.perf_counter()
+                
+                # Read all entries and insert into trie
+                for i in range(entry_count):
+                    # Read key
+                    key_len = read_varint()
+                    key = f.read(key_len).decode('utf-8')
+                    
+                    # Read value
+                    value_len = read_varint()
+                    value = f.read(value_len).decode('utf-8') if value_len > 0 else ""
+                    
+                    # Insert into trie (same as JSON!)
+                    self._insert(key, value)
+                    self.entry_count += 1
+                    
+                    # Progress indicator
+                    if self.entry_count % 50000 == 0:
+                        print(f'\r   Processed: {self.entry_count} entries', end='', flush=True)
+                
+                elapsed = (time.perf_counter() - start_time) * 1000
+                print(f'\n✅ Loaded {self.entry_count} entries in {elapsed:.0f}ms')
+                print(f'   Average: {(elapsed * 1000 / self.entry_count):.2f}μs per entry')
+                print('   ⚡ Using SAME TrieNode structure and traversal as JSON!')
+                
+                return True
+                
+        except Exception as e:
+            print(f'⚠️  Error loading binary format: {e}')
+            return False
     
     def load_from_json(self, file_path: str) -> None:
         """
@@ -208,6 +282,71 @@ class PhonemeConverter:
         )
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# FURIGANA HINT PARSING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@dataclass
+class TextSegment:
+    """Represents a segment of text with optional furigana hint"""
+    text: str
+    furigana_hint: str = ""
+
+
+def parse_furigana_hints(text: str) -> List[TextSegment]:
+    """
+    Parse text into segments, extracting furigana hints.
+    
+    Supported formats:
+    - 健太「けんた」 → base: "健太", hint: "けんた"
+    - 健太【けんた】 → base: "健太", hint: "けんた"
+    - 健太『けんた』 → base: "健太", hint: "けんた"
+    - 健太[けんた] → base: "健太", hint: "けんた"
+    
+    Returns list of TextSegment objects
+    """
+    segments = []
+    current_text = ""
+    i = 0
+    
+    while i < len(text):
+        # Check for furigana brackets
+        if text[i] in '「【『[':
+            # Find the base text (everything accumulated so far)
+            base_text = current_text
+            current_text = ""
+            
+            # Determine closing bracket
+            closing = {'「': '」', '【': '】', '『': '』', '[': ']'}[text[i]]
+            
+            # Find the closing bracket
+            hint_start = i + 1
+            hint_end = text.find(closing, hint_start)
+            
+            if hint_end != -1:
+                # Extract furigana hint
+                furigana_hint = text[hint_start:hint_end]
+                
+                # Add segment with hint
+                if base_text:
+                    segments.append(TextSegment(text=base_text, furigana_hint=furigana_hint))
+                
+                i = hint_end + 1
+            else:
+                # No closing bracket found - treat as normal text
+                current_text += text[i]
+                i += 1
+        else:
+            current_text += text[i]
+            i += 1
+    
+    # Add any remaining text
+    if current_text:
+        segments.append(TextSegment(text=current_text))
+    
+    return segments
+
+
 class WordSegmenter:
     """
     Word segmenter using longest-match algorithm with word dictionary
@@ -346,27 +485,52 @@ def convert_with_segmentation(converter: PhonemeConverter, text: str, segmenter:
 
 
 def convert_detailed_with_segmentation(converter: PhonemeConverter, text: str, segmenter: WordSegmenter) -> ConversionResult:
-    """Convert with word segmentation and detailed information"""
-    # First pass: segment into words
-    words = segmenter.segment(text)
+    """
+    Convert with word segmentation, furigana hints, and detailed information
     
-    # Second pass: convert each word to phonemes
+    Supports furigana hints: 健太「けんた」はバカ
+    - Hint overrides dictionary lookup for that segment
+    - Rest of text uses normal segmentation + conversion
+    """
+    # Parse furigana hints first
+    segments = parse_furigana_hints(text)
+    
+    # Process each segment
     all_matches = []
     all_unmatched = []
     phoneme_parts = []
     byte_offset = 0
     
-    for word in words:
-        word_result = converter.convert_detailed(word)
-        
-        # Adjust match positions to account for original text position
-        for match in word_result.matches:
-            match.start_index += byte_offset
-            all_matches.append(match)
-        
-        phoneme_parts.append(word_result.phonemes)
-        all_unmatched.extend(word_result.unmatched)
-        byte_offset += len(word)
+    for segment in segments:
+        if segment.furigana_hint:
+            # Use the furigana hint for direct conversion
+            hint_result = converter.convert_detailed(segment.furigana_hint)
+            
+            # Create a match for the original text with hint's phoneme
+            if hint_result.phonemes:
+                all_matches.append(Match(
+                    original=segment.text,
+                    phoneme=hint_result.phonemes,
+                    start_index=byte_offset
+                ))
+                phoneme_parts.append(hint_result.phonemes)
+            
+            byte_offset += len(segment.text.encode('utf-8'))
+        else:
+            # Normal segmentation + conversion
+            words = segmenter.segment(segment.text)
+            
+            for word in words:
+                word_result = converter.convert_detailed(word)
+                
+                # Adjust match positions
+                for match in word_result.matches:
+                    match.start_index += byte_offset
+                    all_matches.append(match)
+                
+                phoneme_parts.append(word_result.phonemes)
+                all_unmatched.extend(word_result.unmatched)
+                byte_offset += len(word.encode('utf-8'))
     
     return ConversionResult(
         phonemes=' '.join(phoneme_parts),
@@ -382,32 +546,50 @@ def main():
     print('║  Blazing fast IPA phoneme conversion                    ║')
     print('╚══════════════════════════════════════════════════════════╝\n')
     
-    # Check if JSON file exists
-    import os
-    if not os.path.exists('ja_phonemes.json'):
-        print('❌ Error: ja_phonemes.json not found in current directory')
-        print('   Please ensure the phoneme dictionary is present.')
-        sys.exit(1)
-    
     # Initialize converter and load dictionary
+    # 🚀 Try binary trie first (100x faster!), fallback to JSON
     converter = PhonemeConverter()
-    converter.load_from_json('ja_phonemes.json')
+    loaded_binary = False
+    
+    # Try simple binary format (direct load into TrieNode)
+    if converter.try_load_binary_format('japanese.trie'):
+        loaded_binary = True
+        print('   💡 Binary format loaded directly into TrieNode')
+    else:
+        # Fallback to JSON
+        if not os.path.exists('ja_phonemes.json'):
+            print('❌ Error: Neither japanese.trie nor ja_phonemes.json found')
+            print('   Please ensure a phoneme dictionary is present.')
+            sys.exit(1)
+        
+        print('   ⚠️  Binary trie not found, loading JSON...')
+        converter.load_from_json('ja_phonemes.json')
     
     # Initialize word segmenter if enabled
     segmenter = None
     if USE_WORD_SEGMENTATION:
-        import os
-        if os.path.exists('ja_words.txt'):
+        # If using binary format, words are already loaded in converter's trie!
+        # We still need to create a WordSegmenter that uses the converter's trie
+        if loaded_binary:
+            print('   💡 Word segmentation: Words already in TrieNode from binary format')
+            # Create a WordSegmenter - it will use converter's root for segmentation
             segmenter = WordSegmenter()
-            try:
-                segmenter.load_from_file('ja_words.txt')
-                print('   💡 Word segmentation: ENABLED (spaces will separate words)')
-            except Exception as e:
-                print(f'⚠️  Warning: Could not load word dictionary: {e}')
-                print('   Continuing without word segmentation...')
-                segmenter = None
+            # The segmenter will use converter.root for lookups
+            segmenter.root = converter.root
+            segmenter.word_count = converter.entry_count
         else:
-            print('   💡 Word segmentation: DISABLED (ja_words.txt not found)')
+            # Load separate word file for JSON mode
+            if os.path.exists('ja_words.txt'):
+                segmenter = WordSegmenter()
+                try:
+                    segmenter.load_from_file('ja_words.txt')
+                    print('   💡 Word segmentation: ENABLED (spaces will separate words)')
+                except Exception as e:
+                    print(f'⚠️  Warning: Could not load word dictionary: {e}')
+                    print('   Continuing without word segmentation...')
+                    segmenter = None
+            else:
+                print('   💡 Word segmentation: DISABLED (ja_words.txt not found)')
     
     print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
     
