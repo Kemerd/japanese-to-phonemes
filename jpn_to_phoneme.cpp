@@ -273,17 +273,42 @@ public:
 };
 
 /**
- * Binary trie node reader
+ * Read a varint from binary data
+ * Returns value and advances pointer
+ */
+inline uint32_t read_varint(const uint8_t*& ptr) {
+    uint32_t value = 0;
+    int shift = 0;
+    
+    while (true) {
+        uint8_t byte = *ptr++;
+        value |= (byte & 0x7F) << shift;
+        if ((byte & 0x80) == 0) break;
+        shift += 7;
+    }
+    
+    return value;
+}
+
+/**
+ * Binary trie node reader (VERSION 2.0 - OPTIMIZED FORMAT)
  * Zero-copy access to memory-mapped trie nodes
+ * 
+ * Format changes in v2.0:
+ * - Varints for lengths/counts
+ * - 4-byte relative offsets (not 8-byte absolute)
+ * - 3-byte code points + 4-byte offset = 7 bytes per child (not 12)
+ * - Packed flags byte
  */
 class BinaryTrieNode {
 private:
     const uint8_t* node_data;
     void* file_base;
+    uint16_t format_version;  // 1 or 2
     
 public:
-    BinaryTrieNode(const void* data, void* base) 
-        : node_data(static_cast<const uint8_t*>(data)), file_base(base) {}
+    BinaryTrieNode(const void* data, void* base, uint16_t version = 2) 
+        : node_data(static_cast<const uint8_t*>(data)), file_base(base), format_version(version) {}
     
     /**
      * Check if this node has a value
@@ -293,19 +318,41 @@ public:
     }
     
     /**
-     * Get value length
+     * Get value length and pointer to value data
+     * Returns pair of (value_length, offset_after_flags_and_count)
      */
-    uint16_t get_value_length() const {
-        return *reinterpret_cast<const uint16_t*>(node_data + 1);
+    std::pair<uint32_t, size_t> get_value_info() const {
+        const uint8_t* ptr = node_data;
+        uint8_t flags = *ptr++;
+        
+        // Handle children count in flags or varint
+        uint32_t children_count = 0;
+        if (flags & 0x80) {
+            // Children count is varint
+            children_count = read_varint(ptr);
+        } else {
+            // Children count in flags bits 1-7
+            children_count = (flags >> 1) & 0x7F;
+        }
+        
+        // Now read value if present
+        if (flags & 0x01) {
+            uint32_t value_len = read_varint(ptr);
+            return {value_len, ptr - node_data};
+        }
+        
+        return {0, ptr - node_data};
     }
     
     /**
-     * Get value string (not null-terminated!)
+     * Get value string
      */
     std::string get_value() const {
-        uint16_t len = get_value_length();
+        auto info = get_value_info();
+        uint32_t len = info.first;
+        size_t offset = info.second;
         if (len == 0) return "";
-        const char* value_ptr = reinterpret_cast<const char*>(node_data + 3);
+        const char* value_ptr = reinterpret_cast<const char*>(node_data + offset);
         return std::string(value_ptr, len);
     }
     
@@ -313,9 +360,15 @@ public:
      * Get number of children
      */
     uint32_t get_children_count() const {
-        uint16_t value_len = get_value_length();
-        const uint8_t* children_count_ptr = node_data + 3 + value_len;
-        return *reinterpret_cast<const uint32_t*>(children_count_ptr);
+        uint8_t flags = node_data[0];
+        if (flags & 0x80) {
+            // Children count is varint
+            const uint8_t* ptr = node_data + 1;
+            return read_varint(ptr);
+        } else {
+            // Children count in flags bits 1-7
+            return (flags >> 1) & 0x7F;
+        }
     }
     
     /**
@@ -326,8 +379,23 @@ public:
         uint32_t count = get_children_count();
         if (count == 0) return nullptr;
         
-        uint16_t value_len = get_value_length();
-        const uint8_t* children_table = node_data + 3 + value_len + 4;
+        // Calculate where children table starts
+        const uint8_t* ptr = node_data;
+        uint8_t flags = *ptr++;
+        
+        // Skip children count
+        if (flags & 0x80) {
+            read_varint(ptr);  // Skip varint count
+        }
+        
+        // Skip value if present
+        if (flags & 0x01) {
+            uint32_t value_len = read_varint(ptr);
+            ptr += value_len;
+        }
+        
+        // Now at children table (7 bytes per entry)
+        const uint8_t* children_table = ptr;
         
         // Binary search
         int left = 0;
@@ -335,14 +403,20 @@ public:
         
         while (left <= right) {
             int mid = (left + right) / 2;
-            const uint8_t* entry = children_table + (mid * 12);
-            uint32_t entry_cp = *reinterpret_cast<const uint32_t*>(entry);
+            const uint8_t* entry = children_table + (mid * 7);
+            
+            // Read 3-byte code point
+            uint32_t entry_cp = entry[0] | (entry[1] << 8) | (entry[2] << 16);
             
             if (entry_cp == code_point) {
-                // Found it! Get the offset
-                uint64_t offset = *reinterpret_cast<const uint64_t*>(entry + 4);
-                const uint8_t* child_data = static_cast<const uint8_t*>(file_base) + offset;
-                return new BinaryTrieNode(child_data, file_base);
+                // Found it! Read 4-byte relative offset
+                int32_t relative_offset = *reinterpret_cast<const int32_t*>(entry + 3);
+                
+                // Calculate absolute position (relative to END of this entry)
+                const uint8_t* entry_end = entry + 7;
+                const uint8_t* child_data = entry_end + relative_offset;
+                
+                return new BinaryTrieNode(child_data, file_base, format_version);
             } else if (entry_cp < code_point) {
                 left = mid + 1;
             } else {
@@ -533,6 +607,67 @@ public:
     }
     
     /**
+     * Recursively populate in-memory trie from binary trie node
+     * Walks the binary trie and builds the TrieNode structure
+     * 
+     * We need direct access to node_data, so add a helper to BinaryTrieNode
+     * or just access the data directly here using the same logic
+     */
+    void populate_from_binary_node(const uint8_t* node_data, void* file_base, uint16_t version, 
+                                     TrieNode* memory_node, const std::string& current_path) {
+        const uint8_t* ptr = node_data;
+        uint8_t flags = *ptr++;
+        
+        // Get children count
+        uint32_t child_count = 0;
+        if (flags & 0x80) {
+            child_count = read_varint(ptr);
+        } else {
+            child_count = (flags >> 1) & 0x7F;
+        }
+        
+        // Read value if present
+        if (flags & 0x01) {
+            uint32_t value_len = read_varint(ptr);
+            if (value_len > 0) {
+                std::string value(reinterpret_cast<const char*>(ptr), value_len);
+                if (!value.empty()) {
+                    memory_node->phoneme = value;
+                }
+            }
+            ptr += value_len;
+        }
+        
+        // Process children
+        if (child_count == 0) return;
+        
+        const uint8_t* children_table = ptr;
+        
+        for (uint32_t i = 0; i < child_count; i++) {
+            const uint8_t* entry = children_table + (i * 7);
+            
+            // Read 3-byte code point
+            uint32_t code_point = entry[0] | (entry[1] << 8) | (entry[2] << 16);
+            
+            // Read 4-byte relative offset
+            int32_t relative_offset = *reinterpret_cast<const int32_t*>(entry + 3);
+            
+            // Calculate child node position
+            const uint8_t* entry_end = entry + 7;
+            const uint8_t* child_data = entry_end + relative_offset;
+            
+            // Create or get TrieNode child
+            if (memory_node->children.find(code_point) == memory_node->children.end()) {
+                memory_node->children[code_point] = std::make_unique<TrieNode>();
+            }
+            
+            // Recursively populate
+            populate_from_binary_node(child_data, file_base, version, 
+                                      memory_node->children[code_point].get(), current_path);
+        }
+    }
+    
+    /**
      * Try to load from binary trie format (japanese.trie)
      * Returns true if successful, false if file doesn't exist or is invalid
      * 🚀 100x faster than JSON loading!
@@ -558,22 +693,34 @@ public:
             return false;
         }
         
-        // Check version
-        if (header->version_major != 1 || header->version_minor != 0) {
+        // Check version (support v1.0 and v2.0)
+        if ((header->version_major != 1 && header->version_major != 2) || header->version_minor != 0) {
             std::cerr << "❌ Unsupported binary trie version: " << header->version_major 
                       << "." << header->version_minor << std::endl;
+            std::cerr << "   (Supported versions: 1.0, 2.0)" << std::endl;
             binary_trie_file.close();
             return false;
         }
         
-        // Success!
+        // Success! Now populate the in-memory trie from binary trie
         using_binary_trie = true;
         entry_count = header->phoneme_count + header->word_count;
         
-        std::cout << "🚀 Loaded binary trie: " << header->phoneme_count << " phonemes + " 
+        std::cout << "🚀 Loaded binary trie v" << header->version_major << "." << header->version_minor 
+                  << ": " << header->phoneme_count << " phonemes + " 
                   << header->word_count << " words" << std::endl;
-        std::cout << "   File size: " << (binary_trie_file.size() / 1024.0 / 1024.0) << " MB" << std::endl;
+        std::cout << "   File size: " << std::fixed << std::setprecision(2) 
+                  << (binary_trie_file.size() / 1024.0 / 1024.0) << " MB" << std::endl;
+        if (header->version_major == 2) {
+            std::cout << "   ⚡ OPTIMIZED format (varints + relative offsets)" << std::endl;
+        }
         std::cout << "   ⚡ Instant loading via memory mapping!" << std::endl;
+        
+        // Build in-memory trie from binary trie for fast lookups
+        std::cout << "   Building in-memory index..." << std::flush;
+        const uint8_t* root_ptr = static_cast<const uint8_t*>(binary_trie_file.data()) + header->root_offset;
+        populate_from_binary_node(root_ptr, binary_trie_file.data(), header->version_major, root.get(), "");
+        std::cout << " Done!" << std::endl;
         
         return true;
     }

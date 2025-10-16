@@ -287,22 +287,32 @@ This will:
 
 ## Version History
 
-### Version 1.0 (Current)
+### Version 2.0 (Current) - OPTIMIZED FORMAT
+- **50% smaller file size** compared to v1.0
+- Varint encoding for counts and lengths (1 byte for small values)
+- 4-byte **relative offsets** instead of 8-byte absolute
+- **7-byte child entries** (3-byte code point + 4-byte offset) instead of 12-byte
+- Packed flags byte (children count embedded when < 127)
+- Same instant loading performance
+- Backward compatible reader (supports both v1.0 and v2.0)
+
+### Version 1.0 (Legacy)
 - Initial release
 - Unified phoneme + word storage
 - Memory-mappable format
+- 8-byte absolute offsets
+- 12-byte child entries
 - Little-endian byte ordering
 - Binary search of child nodes
 
-## Future Extensions (Version 2.0+)
+## Future Extensions (Version 3.0+)
 
 Potential improvements for future versions:
 
 1. **Compressed values**: Use dictionary encoding for common phonemes
-2. **Prefix compression**: Share common node prefixes
-3. **DFA minimization**: Merge equivalent nodes
-4. **SIMD search**: Vectorized child node search
-5. **Cache-friendly layout**: Breadth-first node ordering
+2. **DFA minimization**: Merge equivalent nodes
+3. **SIMD search**: Vectorized child node search
+4. **Cache-friendly layout**: Breadth-first node ordering
 
 ## Notes
 

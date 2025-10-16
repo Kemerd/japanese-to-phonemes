@@ -707,10 +707,23 @@ class TrieNodeBuilder:
         current.value = value
 
 
+def write_varint(output, value):
+    """Write a variable-length integer (1-5 bytes for values up to 2^32)"""
+    while value >= 0x80:
+        output.append((value & 0x7F) | 0x80)
+        value >>= 7
+    output.append(value & 0x7F)
+
+
 def serialize_trie_node(node, output, offset_tracker):
     """
-    Recursively serialize a trie node to binary format.
+    Recursively serialize a trie node to OPTIMIZED binary format.
     Returns the offset where this node was written.
+    
+    OPTIMIZED FORMAT:
+    - Varint for counts/lengths (1 byte for small values)
+    - 4-byte RELATIVE offsets (not absolute)
+    - Compact child entries: 3-byte code point + 4-byte relative offset = 7 bytes
     """
     # Remember where we're writing this node
     node_offset = len(output)
@@ -718,26 +731,28 @@ def serialize_trie_node(node, output, offset_tracker):
     
     # Flags byte
     has_value = 1 if node.value is not None else 0
-    flags = has_value
-    output.append(flags)
+    num_children = len(node.children)
     
-    # Value (if present)
+    # Pack flags: bit 0 = has_value, bits 1-7 = children count if < 127
+    if num_children < 127:
+        flags = has_value | (num_children << 1)
+        output.append(flags)
+    else:
+        flags = has_value | 0x80  # Bit 7 = use varint for count
+        output.append(flags)
+        write_varint(output, num_children)
+    
+    # Value (if present) - use varint for length
     if node.value is not None:
         value_bytes = node.value.encode('utf-8')
         value_len = len(value_bytes)
-        output.extend(struct.pack('<H', value_len))  # 2 bytes: value length
+        write_varint(output, value_len)
         output.extend(value_bytes)
-    else:
-        output.extend(struct.pack('<H', 0))  # No value
     
-    # Children count
-    num_children = len(node.children)
-    output.extend(struct.pack('<I', num_children))  # 4 bytes: children count
-    
-    # Reserve space for children entries (we'll fill these in later)
+    # Reserve space for children entries - NOW ONLY 7 BYTES EACH!
+    # Format: 3 bytes for code point (up to 0xFFFFFF) + 4 bytes relative offset
     children_table_offset = len(output)
-    # Each child entry: 4 bytes (code point) + 8 bytes (offset) = 12 bytes
-    output.extend(b'\x00' * (num_children * 12))
+    output.extend(b'\x00' * (num_children * 7))
     
     # Recursively serialize children and record their offsets
     child_offsets = {}
@@ -745,15 +760,22 @@ def serialize_trie_node(node, output, offset_tracker):
         child_offset = serialize_trie_node(child_node, output, offset_tracker)
         child_offsets[code_point] = child_offset
     
-    # Now go back and fill in the children table
+    # Now go back and fill in the children table with RELATIVE offsets
     table_pos = children_table_offset
     for code_point, child_offset in sorted(child_offsets.items()):
-        # Write code point (4 bytes)
-        struct.pack_into('<I', output, table_pos, code_point)
-        table_pos += 4
-        # Write offset (8 bytes)
-        struct.pack_into('<Q', output, table_pos, child_offset)
-        table_pos += 8
+        # Calculate relative offset from END of this child entry
+        entry_end = table_pos + 7
+        relative_offset = child_offset - entry_end
+        
+        # Write code point (3 bytes - supports all Unicode)
+        output[table_pos] = (code_point & 0xFF)
+        output[table_pos + 1] = ((code_point >> 8) & 0xFF)
+        output[table_pos + 2] = ((code_point >> 16) & 0xFF)
+        
+        # Write relative offset (4 bytes signed)
+        struct.pack_into('<i', output, table_pos + 3, relative_offset)
+        
+        table_pos += 7
     
     return node_offset
 
@@ -767,7 +789,7 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
         word_set: Set of words (will be marked with empty string values)
         output_path: Path to write the .trie file
     """
-    print(f"\n🔥 Building unified binary trie...")
+    print(f"\n>> Building unified binary trie...")
     
     # Create root node
     root = TrieNodeBuilder()
@@ -778,7 +800,7 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
         root.insert(text, phoneme)
         if idx % 50000 == 0 and idx > 0:
             print(f"\r   Phonemes: {idx}/{len(phoneme_dict)}", end='', flush=True)
-    print(f"\r   Phonemes: {len(phoneme_dict)}/{len(phoneme_dict)} ✓")
+    print(f"\r   Phonemes: {len(phoneme_dict)}/{len(phoneme_dict)} [OK]")
     
     # Insert word entries (with empty value as marker)
     # Only add words that aren't already phoneme entries to avoid duplicates
@@ -790,7 +812,7 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
             word_only_count += 1
         if idx % 50000 == 0 and idx > 0:
             print(f"\r   Words: {idx}/{len(word_set)} ({word_only_count} unique)", end='', flush=True)
-    print(f"\r   Words: {len(word_set)}/{len(word_set)} ({word_only_count} unique) ✓")
+    print(f"\r   Words: {len(word_set)}/{len(word_set)} ({word_only_count} unique) [OK]")
     
     # Serialize to binary
     print(f"   Serializing trie to binary format...")
@@ -800,8 +822,8 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
     # Magic number: "JPNT" (Japanese Phoneme/Name Trie)
     output.extend(b'JPNT')
     
-    # Version: 1.0
-    output.extend(struct.pack('<H', 1))  # Major version
+    # Version: 2.0 (optimized format with varints and relative offsets)
+    output.extend(struct.pack('<H', 2))  # Major version
     output.extend(struct.pack('<H', 0))  # Minor version
     
     # Entry counts
@@ -824,7 +846,7 @@ def build_binary_trie(phoneme_dict, word_set, output_path):
     file_size = len(output)
     file_size_mb = file_size / (1024 * 1024)
     
-    print(f"   ✅ Binary trie created!")
+    print(f"   [OK] Binary trie created!")
     print(f"   Size: {file_size:,} bytes ({file_size_mb:.2f} MB)")
     print(f"   Entries: {len(phoneme_dict)} phonemes + {word_only_count} words")
     
@@ -918,7 +940,7 @@ def main():
             print(f"\r   Progress: [{'=' * filled}{' ' * (progress_bar_width - filled)}] {progress * 100:.1f}% | Verbs: {verb_count} | Conjugations: {conjugation_count}", end='', flush=True)
     
     print()  # New line after progress bar
-    print(f"\n   ✅ Parallel processing complete!")
+    print(f"\n   [OK] Parallel processing complete!")
     print(f"   Found {verb_count} verbs")
     print(f"   Generated {conjugation_count} new conjugations")
     print(f"   Skipped {skipped_count} (already existed)")
@@ -970,9 +992,9 @@ def main():
                 f.write(word + '\n')
         
         print(f" Done!")
-        print(f"   ✅ Word list saved to ja_words.txt")
+        print(f"   [OK] Word list saved to ja_words.txt")
     else:
-        print(f"   ⚠️  {words_source} not found, skipping word list update")
+        print(f"   [WARN] {words_source} not found, skipping word list update")
     
     # Step 2: Remove punctuation entries
     print("\nStep 2: Removing punctuation entries...")
@@ -1001,7 +1023,7 @@ def main():
             progress_pct = (idx / total_keys) * 100
             print(f"\r   Processing: {progress_pct:.1f}% ({idx}/{total_keys}) | Converted: {converted_count}", end='', flush=True)
     
-    print(f"\r   ✅ Converted {converted_count} entries" + " " * 40)  # Clear progress line
+    print(f"\r   [OK] Converted {converted_count} entries" + " " * 40)  # Clear progress line
     
     # Show examples (skip console output due to encoding issues on Windows)
     print(f"\n   Ligature conversions completed")
@@ -1042,7 +1064,7 @@ def main():
     if os.path.exists(words_source):
         build_binary_trie(data, word_set, 'japanese.trie')
     else:
-        print(f"   ⚠️  Skipping binary trie (word list not available)")
+        print(f"   [WARN] Skipping binary trie (word list not available)")
     
     print(f"\n[COMPLETE] Done!")
     print(f"\nSummary:")
@@ -1051,7 +1073,7 @@ def main():
     print(f"   - Verbs found: {verb_count}")
     print(f"   - Verb conjugations generated: {conjugation_count}")
     if os.path.exists(words_source):
-        print(f"   - Word list: {original_word_count} → {len(word_set)} (+{words_added})")
+        print(f"   - Word list: {original_word_count} -> {len(word_set)} (+{words_added})")
     print(f"   - Removed punctuation: {removed_punct}")
     print(f"   - Converted to ligatures: {converted_count}")
     print(f"   - Invalid phoneme entries: {len(invalid_entries)}")
@@ -1062,9 +1084,10 @@ def main():
         print(f"   - ja_words.txt (word segmentation dictionary)")
         print(f"   - japanese.trie (binary trie - FAST loading!)")
     print(f"\nNote: Punctuation in input text will pass through unchanged")
-    print(f"Note: All verb conjugations (past, て-form, negative, etc.) are now in dictionary")
+    print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
     print(f"Note: Use japanese.trie for 100x faster loading in C++!")
 
 if __name__ == '__main__':
     main()
+
 
