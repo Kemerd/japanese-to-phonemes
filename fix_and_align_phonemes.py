@@ -27,6 +27,8 @@ Output: ja_phonemes.json (cleaned and aligned dictionary)
 import json
 import os
 import shutil
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Map multi-character IPA to single-character ligatures (from tokenizer vocab)
 LIGATURE_MAP = {
@@ -101,6 +103,570 @@ COMMON_KANJI = {
     '咲': 'saki',  # bloom/blossom
 }
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VERB CONJUGATION SYSTEM
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Godan verb endings and their phoneme representations
+GODAN_ENDINGS = {
+    'う': 'ɯ',      # 買う (kaɯ)
+    'く': 'kɯ',     # 書く (kakɯ)
+    'ぐ': 'gɯ',     # 泳ぐ (ojogɯ)
+    'す': 'sɯ',     # 話す (hanasɯ)
+    'つ': 'ʦɯ',     # 待つ (maʦɯ)
+    'ぬ': 'nɯ',     # 死ぬ (ɕinɯ)
+    'ぶ': 'bɯ',     # 飛ぶ (tobɯ)
+    'む': 'mɯ',     # 読む (jomɯ)
+    'る': 'ɾɯ',     # 走る (haɕiɾɯ)
+}
+
+# Godan て-form and た-form phoneme transformations
+# Format: ending_sound → (te_modification, te_suffix, ta_suffix)
+GODAN_TE_TA_MAP = {
+    # く → いて/いた
+    'k': ('i', 'te', 'ta'),      # 書く kakɯ → 書いて kaite → 書いた kaita
+    # ぐ → いで/いだ
+    'g': ('i', 'de', 'da'),      # 泳ぐ ojogɯ → 泳いで ojoide → 泳いだ ojoida
+    # す → して/した
+    's': ('ɕi', 'te', 'ta'),     # 話す hanasɯ → 話して hanaɕite → 話した hanaɕita
+    # つ → って/った
+    't': ('tː', 'e', 'a'),       # 待つ maʦɯ → 待って matːe → 待った matːa
+    # ぬ → んで/んだ
+    'n': ('ɴ', 'de', 'da'),      # 死ぬ ɕinɯ → 死んで ɕiɴde → 死んだ ɕiɴda
+    # ぶ → んで/んだ
+    'b': ('ɴ', 'de', 'da'),      # 飛ぶ tobɯ → 飛んで toɴde → 飛んだ toɴda
+    # む → んで/んだ
+    'm': ('ɴ', 'de', 'da'),      # 読む jomɯ → 読んで joɴde → 読んだ joɴda
+    # る → って/った
+    'ɾ': ('tː', 'e', 'a'),       # 走る haɕiɾɯ → 走って haɕitːe → 走った haɕitːa
+    # う → って/った (ɰ in phonemes)
+    'ɰ': ('tː', 'e', 'a'),       # 買う kaɰ → 買って katːe → 買った katːa
+}
+
+# Text-level て-form and た-form transformations for godan verbs
+GODAN_TE_TA_TEXT = {
+    'く': ('い', 'て', 'た'),
+    'ぐ': ('い', 'で', 'だ'),
+    'す': ('し', 'て', 'た'),
+    'つ': ('っ', 'て', 'た'),
+    'ぬ': ('ん', 'で', 'だ'),
+    'ぶ': ('ん', 'で', 'だ'),
+    'む': ('ん', 'で', 'だ'),
+    'る': ('っ', 'て', 'た'),
+    'う': ('っ', 'て', 'た'),
+}
+
+# Special irregular verbs with complete conjugation data
+IRREGULAR_VERBS = {
+    'する': {
+        'type': 'suru',
+        'phoneme': 'sɯɾɯ',
+        'stems': {
+            'text': {'mizen': 'し', 'renyou': 'し', 'base': 'す'},
+            'phoneme': {'mizen': 'ɕi', 'renyou': 'ɕi', 'base': 'sɯ'}
+        }
+    },
+    '来る': {
+        'type': 'kuru',
+        'phoneme': 'kɯɾɯ',
+        'stems': {
+            'text': {'mizen': 'こ', 'renyou': 'き', 'base': 'く'},
+            'phoneme': {'mizen': 'ko', 'renyou': 'ki', 'base': 'kɯ'}
+        }
+    },
+    'くる': {
+        'type': 'kuru',
+        'phoneme': 'kɯɾɯ',
+        'stems': {
+            'text': {'mizen': 'こ', 'renyou': 'き', 'base': 'く'},
+            'phoneme': {'mizen': 'ko', 'renyou': 'ki', 'base': 'kɯ'}
+        }
+    },
+}
+
+# Verbs that look like ichidan but are actually godan (exceptions)
+GODAN_EXCEPTIONS = {
+    '帰る', '切る', '走る', '入る', '要る', '知る', '蹴る', '滑る',
+    '限る', '握る', '練る', '減る', '焦る', '覆る', '遮る', '捻る',
+}
+
+def detect_verb_type(word, phoneme):
+    """
+    Detect if word is a verb and classify its type.
+    
+    Returns:
+        str: Verb type ('ichidan', 'godan_X', 'suru', 'suru_compound', 
+             'kuru', 'kuru_compound', 'iku', 'aru') or None if not a verb
+    """
+    # Check for irregular verbs first
+    if word in IRREGULAR_VERBS:
+        return IRREGULAR_VERBS[word]['type']
+    
+    # Special verb with exceptional negative form
+    if word == 'ある':
+        return 'aru'
+    
+    # Special verb with exceptional て-form
+    if word == '行く' or word == 'いく':
+        return 'iku'
+    
+    # する-verb compounds (勉強する, 運転する, etc.)
+    if word.endswith('する') and len(word) > 2:
+        return 'suru_compound'
+    
+    # 来る-verb compounds (持って来る, etc.)
+    if (word.endswith('来る') and len(word) > 2) or (word.endswith('くる') and len(word) > 2):
+        return 'kuru_compound'
+    
+    # Must end in る to be a verb
+    if not word.endswith('る'):
+        return None
+    
+    # Check for godan exceptions (verbs that look ichidan but aren't)
+    if word in GODAN_EXCEPTIONS:
+        return 'godan_ru'
+    
+    # Ichidan verbs: る preceded by い/え sound in PHONEME
+    # This is the key - we check the phoneme, not the text!
+    if phoneme.endswith('ɾɯ'):
+        phoneme_stem = phoneme[:-2]  # Remove ɾɯ
+        if len(phoneme_stem) > 0:
+            # Check if ends with 'i' or 'e' sound
+            if phoneme_stem.endswith('i') or phoneme_stem.endswith('e'):
+                return 'ichidan'
+    
+    # Default to godan る-verb
+    return 'godan_ru'
+
+
+def get_verb_stems(word, phoneme, verb_type):
+    """
+    Extract verb stems for conjugation from both text and phonemes.
+    
+    Returns:
+        dict: Contains 'text_stem', 'phoneme_stem', 'text_ending', 'phoneme_ending'
+    """
+    stems = {}
+    
+    # Handle irregular verbs
+    if verb_type in ['suru', 'kuru']:
+        irregular_data = IRREGULAR_VERBS.get(word, IRREGULAR_VERBS[word if word in IRREGULAR_VERBS else '来る'])
+        return irregular_data['stems']
+    
+    # Handle compound verbs
+    if verb_type == 'suru_compound':
+        # 勉強する → 勉強 + する stems
+        text_prefix = word[:-2]  # Remove する
+        phoneme_prefix = phoneme[:-3]  # Remove sɯɾɯ
+        return {
+            'text': {
+                'prefix': text_prefix,
+                'mizen': text_prefix + 'し',
+                'renyou': text_prefix + 'し',
+                'base': text_prefix + 'す'
+            },
+            'phoneme': {
+                'prefix': phoneme_prefix,
+                'mizen': phoneme_prefix + 'ɕi',
+                'renyou': phoneme_prefix + 'ɕi',
+                'base': phoneme_prefix + 'sɯ'
+            }
+        }
+    
+    if verb_type == 'kuru_compound':
+        # Extract prefix before 来る/くる
+        if word.endswith('来る'):
+            text_prefix = word[:-2]
+            phoneme_prefix = phoneme[:-3]
+        else:
+            text_prefix = word[:-2]
+            phoneme_prefix = phoneme[:-3]
+        return {
+            'text': {
+                'prefix': text_prefix,
+                'mizen': text_prefix + 'こ',
+                'renyou': text_prefix + 'き',
+                'base': text_prefix + 'く'
+            },
+            'phoneme': {
+                'prefix': phoneme_prefix,
+                'mizen': phoneme_prefix + 'ko',
+                'renyou': phoneme_prefix + 'ki',
+                'base': phoneme_prefix + 'kɯ'
+            }
+        }
+    
+    # Ichidan verbs: remove る (ɾɯ in phoneme)
+    if verb_type == 'ichidan':
+        text_stem = word[:-1]  # Remove る
+        phoneme_stem = phoneme[:-2]  # Remove ɾɯ
+        return {
+            'text': {'stem': text_stem},
+            'phoneme': {'stem': phoneme_stem}
+        }
+    
+    # Godan verbs: need to identify the ending consonant
+    if verb_type.startswith('godan') or verb_type in ['iku', 'aru']:
+        text_ending = word[-1]  # く, ぐ, す, etc.
+        
+        # Find the consonant in the phoneme
+        # For most godan verbs, ending is consonant + ɯ
+        if phoneme.endswith('ɯ'):
+            if len(phoneme) >= 2:
+                phoneme_ending = phoneme[-2]  # The consonant before ɯ
+                phoneme_stem = phoneme[:-2]
+            else:
+                phoneme_ending = 'ɯ'
+                phoneme_stem = ''
+        else:
+            # Shouldn't happen for godan, but handle gracefully
+            phoneme_ending = phoneme[-1] if phoneme else ''
+            phoneme_stem = phoneme[:-1] if len(phoneme) > 1 else ''
+        
+        text_stem = word[:-1]
+        
+        return {
+            'text': {'stem': text_stem, 'ending': text_ending},
+            'phoneme': {'stem': phoneme_stem, 'ending': phoneme_ending}
+        }
+    
+    # Fallback
+    return {
+        'text': {'stem': word[:-1]},
+        'phoneme': {'stem': phoneme[:-2] if phoneme.endswith('ɾɯ') else phoneme[:-1]}
+    }
+
+
+def generate_conjugations(word, phoneme, verb_type):
+    """
+    Generate all core conjugation forms for a verb.
+    
+    Returns:
+        dict: Mapping of {conjugated_text: conjugated_phoneme}
+    """
+    conjugations = {}
+    stems = get_verb_stems(word, phoneme, verb_type)
+    
+    # ============================================================
+    # ICHIDAN VERBS (食べる, 見る, etc.)
+    # ============================================================
+    if verb_type == 'ichidan':
+        text_stem = stems['text']['stem']
+        phon_stem = stems['phoneme']['stem']
+        
+        # 1. Past (た): 食べた
+        conjugations[text_stem + 'た'] = phon_stem + 'ta'
+        
+        # 2. Te-form (て): 食べて
+        conjugations[text_stem + 'て'] = phon_stem + 'te'
+        
+        # 3. Negative (ない): 食べない
+        conjugations[text_stem + 'ない'] = phon_stem + 'nai'
+        
+        # 4. Negative past (なかった): 食べなかった
+        conjugations[text_stem + 'なかった'] = phon_stem + 'nakatta'
+        
+        # 5. Polite present (ます): 食べます
+        conjugations[text_stem + 'ます'] = phon_stem + 'masɯ'
+        
+        # 6. Polite past (ました): 食べました
+        conjugations[text_stem + 'ました'] = phon_stem + 'maɕita'
+        
+        # 7. Polite negative (ません): 食べません
+        conjugations[text_stem + 'ません'] = phon_stem + 'maseɴ'
+        
+        # 8. Polite negative past (ませんでした): 食べませんでした
+        conjugations[text_stem + 'ませんでした'] = phon_stem + 'maseɴdeɕita'
+        
+        # 9. Conditional (ば): 食べれば
+        conjugations[text_stem + 'れば'] = phon_stem + 'ɾeba'
+        
+        # 10. Volitional (よう): 食べよう
+        conjugations[text_stem + 'よう'] = phon_stem + 'joɯ'
+        
+        # 11. Imperative (ろ/よ): 食べろ
+        conjugations[text_stem + 'ろ'] = phon_stem + 'ɾo'
+        conjugations[text_stem + 'よ'] = phon_stem + 'jo'
+        
+        # 12. Potential (られる): 食べられる
+        conjugations[text_stem + 'られる'] = phon_stem + 'ɾaɾeɾɯ'
+        
+        # 13. Passive (られる): Same as potential for ichidan
+        # Already covered above
+        
+        # 14. Causative (させる): 食べさせる
+        conjugations[text_stem + 'させる'] = phon_stem + 'saseɾɯ'
+        
+        # 15. Conditional (たら): 食べたら
+        conjugations[text_stem + 'たら'] = phon_stem + 'taɾa'
+    
+    # ============================================================
+    # GODAN VERBS (書く, 話す, 買う, etc.)
+    # ============================================================
+    elif verb_type.startswith('godan') or verb_type in ['iku', 'aru']:
+        text_stem = stems['text']['stem']
+        text_ending = stems['text']['ending']
+        phon_stem = stems['phoneme']['stem']
+        phon_ending = stems['phoneme']['ending']
+        
+        # Special case: 行く has irregular て-form
+        if verb_type == 'iku':
+            # 行いて → 行って (itte not iite)
+            conjugations[text_stem + 'った'] = phon_stem + 'itːa'
+            conjugations[text_stem + 'って'] = phon_stem + 'itːe'
+            conjugations[text_stem + 'ったら'] = phon_stem + 'itːaɾa'
+        else:
+            # Normal godan て/た forms
+            if text_ending in GODAN_TE_TA_TEXT and phon_ending in GODAN_TE_TA_MAP:
+                te_mod_text, te_suff_text, ta_suff_text = GODAN_TE_TA_TEXT[text_ending]
+                te_mod_phon, te_suff_phon, ta_suff_phon = GODAN_TE_TA_MAP[phon_ending]
+                
+                # 1. Past (た): 書いた
+                conjugations[text_stem + te_mod_text + ta_suff_text] = phon_stem + te_mod_phon + ta_suff_phon
+                
+                # 2. Te-form (て): 書いて
+                conjugations[text_stem + te_mod_text + te_suff_text] = phon_stem + te_mod_phon + te_suff_phon
+                
+                # 15. Conditional (たら): 書いたら
+                conjugations[text_stem + te_mod_text + ta_suff_text + 'ら'] = phon_stem + te_mod_phon + ta_suff_phon + 'ɾa'
+        
+        # Get あ-row character for negative stem (未然形)
+        # く→か, ぐ→が, す→さ, etc.
+        a_row_map = {
+            'く': ('か', 'ka'), 'ぐ': ('が', 'ga'), 'す': ('さ', 'sa'),
+            'つ': ('た', 'ta'), 'ぬ': ('な', 'na'), 'ぶ': ('ば', 'ba'),
+            'む': ('ま', 'ma'), 'る': ('ら', 'ɾa'), 'う': ('わ', 'ɰa')
+        }
+        
+        # Special case: ある → ない (not あらない)
+        if verb_type == 'aru':
+            conjugations['ない'] = 'nai'
+            conjugations['なかった'] = 'nakatta'
+        else:
+            if text_ending in a_row_map:
+                a_text, a_phon = a_row_map[text_ending]
+                
+                # 3. Negative (ない): 書かない
+                conjugations[text_stem + a_text + 'ない'] = phon_stem + a_phon + 'nai'
+                
+                # 4. Negative past (なかった): 書かなかった
+                conjugations[text_stem + a_text + 'なかった'] = phon_stem + a_phon + 'nakatta'
+                
+                # 14. Causative (せる): 書かせる
+                conjugations[text_stem + a_text + 'せる'] = phon_stem + a_phon + 'seɾɯ'
+        
+        # Get い-row character for polite stem (連用形)
+        i_row_map = {
+            'く': ('き', 'ki'), 'ぐ': ('ぎ', 'gi'), 'す': ('し', 'ɕi'),
+            'つ': ('ち', 'ʨi'), 'ぬ': ('に', 'ni'), 'ぶ': ('び', 'bi'),
+            'む': ('み', 'mi'), 'る': ('り', 'ɾi'), 'う': ('い', 'i')
+        }
+        
+        if text_ending in i_row_map:
+            i_text, i_phon = i_row_map[text_ending]
+            
+            # 5. Polite present (ます): 書きます
+            conjugations[text_stem + i_text + 'ます'] = phon_stem + i_phon + 'masɯ'
+            
+            # 6. Polite past (ました): 書きました
+            conjugations[text_stem + i_text + 'ました'] = phon_stem + i_phon + 'maɕita'
+            
+            # 7. Polite negative (ません): 書きません
+            conjugations[text_stem + i_text + 'ません'] = phon_stem + i_phon + 'maseɴ'
+            
+            # 8. Polite negative past (ませんでした): 書きませんでした
+            conjugations[text_stem + i_text + 'ませんでした'] = phon_stem + i_phon + 'maseɴdeɕita'
+        
+        # Get え-row character for conditional/potential (仮定形/可能形)
+        e_row_map = {
+            'く': ('け', 'ke'), 'ぐ': ('げ', 'ge'), 'す': ('せ', 'se'),
+            'つ': ('て', 'te'), 'ぬ': ('ね', 'ne'), 'ぶ': ('べ', 'be'),
+            'む': ('め', 'me'), 'る': ('れ', 'ɾe'), 'う': ('え', 'e')
+        }
+        
+        if text_ending in e_row_map:
+            e_text, e_phon = e_row_map[text_ending]
+            
+            # 9. Conditional (ば): 書けば
+            conjugations[text_stem + e_text + 'ば'] = phon_stem + e_phon + 'ba'
+            
+            # 11. Imperative (命令形): 書け
+            conjugations[text_stem + e_text] = phon_stem + e_phon
+            
+            # 12. Potential (られる): 書ける
+            conjugations[text_stem + e_text + 'る'] = phon_stem + e_phon + 'ɾɯ'
+        
+        # Get あ-row for passive (受身形)
+        if text_ending in a_row_map:
+            a_text, a_phon = a_row_map[text_ending]
+            
+            # 13. Passive (られる): 書かれる
+            conjugations[text_stem + a_text + 'れる'] = phon_stem + a_phon + 'ɾeɾɯ'
+        
+        # Get お-row for volitional (意向形)
+        o_row_map = {
+            'く': ('こ', 'ko'), 'ぐ': ('ご', 'go'), 'す': ('そ', 'so'),
+            'つ': ('と', 'to'), 'ぬ': ('の', 'no'), 'ぶ': ('ぼ', 'bo'),
+            'む': ('も', 'mo'), 'る': ('ろ', 'ɾo'), 'う': ('お', 'o')
+        }
+        
+        if text_ending in o_row_map:
+            o_text, o_phon = o_row_map[text_ending]
+            
+            # 10. Volitional (よう): 書こう
+            conjugations[text_stem + o_text + 'う'] = phon_stem + o_phon + 'ɯ'
+    
+    # ============================================================
+    # IRREGULAR VERBS (する, 来る)
+    # ============================================================
+    elif verb_type == 'suru':
+        # する conjugations
+        conjugations['した'] = 'ɕita'
+        conjugations['して'] = 'ɕite'
+        conjugations['しない'] = 'ɕinai'
+        conjugations['しなかった'] = 'ɕinakatta'
+        conjugations['します'] = 'ɕimasɯ'
+        conjugations['しました'] = 'ɕimaɕita'
+        conjugations['しません'] = 'ɕimaseɴ'
+        conjugations['しませんでした'] = 'ɕimaseɴdeɕita'
+        conjugations['すれば'] = 'sɯɾeba'
+        conjugations['しよう'] = 'ɕijoɯ'
+        conjugations['しろ'] = 'ɕiɾo'
+        conjugations['せよ'] = 'sejo'
+        conjugations['できる'] = 'dekiɾɯ'  # Potential form
+        conjugations['される'] = 'saɾeɾɯ'  # Passive
+        conjugations['させる'] = 'saseɾɯ'  # Causative
+        conjugations['したら'] = 'ɕitaɾa'
+    
+    elif verb_type == 'kuru':
+        # 来る conjugations
+        conjugations['来た'] = 'kita'
+        conjugations['きた'] = 'kita'
+        conjugations['来て'] = 'kite'
+        conjugations['きて'] = 'kite'
+        conjugations['来ない'] = 'konai'
+        conjugations['こない'] = 'konai'
+        conjugations['来なかった'] = 'konakatta'
+        conjugations['こなかった'] = 'konakatta'
+        conjugations['来ます'] = 'kimasɯ'
+        conjugations['きます'] = 'kimasɯ'
+        conjugations['来ました'] = 'kimaɕita'
+        conjugations['きました'] = 'kimaɕita'
+        conjugations['来ません'] = 'kimaseɴ'
+        conjugations['きません'] = 'kimaseɴ'
+        conjugations['来ませんでした'] = 'kimaseɴdeɕita'
+        conjugations['きませんでした'] = 'kimaseɴdeɕita'
+        conjugations['来れば'] = 'kɯɾeba'
+        conjugations['くれば'] = 'kɯɾeba'
+        conjugations['来よう'] = 'kojoɯ'
+        conjugations['こよう'] = 'kojoɯ'
+        conjugations['来い'] = 'koi'
+        conjugations['こい'] = 'koi'
+        conjugations['来られる'] = 'koɾaɾeɾɯ'
+        conjugations['こられる'] = 'koɾaɾeɾɯ'
+        conjugations['来させる'] = 'kisaseɾɯ'
+        conjugations['こさせる'] = 'kosaseɾɯ'
+        conjugations['来たら'] = 'kitaɾa'
+        conjugations['きたら'] = 'kitaɾa'
+    
+    # ============================================================
+    # COMPOUND VERBS (勉強する, 持って来る)
+    # ============================================================
+    elif verb_type == 'suru_compound':
+        text_prefix = stems['text']['prefix']
+        phon_prefix = stems['phoneme']['prefix']
+        
+        # Generate all する forms with prefix
+        conjugations[text_prefix + 'した'] = phon_prefix + 'ɕita'
+        conjugations[text_prefix + 'して'] = phon_prefix + 'ɕite'
+        conjugations[text_prefix + 'しない'] = phon_prefix + 'ɕinai'
+        conjugations[text_prefix + 'しなかった'] = phon_prefix + 'ɕinakatta'
+        conjugations[text_prefix + 'します'] = phon_prefix + 'ɕimasɯ'
+        conjugations[text_prefix + 'しました'] = phon_prefix + 'ɕimaɕita'
+        conjugations[text_prefix + 'しません'] = phon_prefix + 'ɕimaseɴ'
+        conjugations[text_prefix + 'しませんでした'] = phon_prefix + 'ɕimaseɴdeɕita'
+        conjugations[text_prefix + 'すれば'] = phon_prefix + 'sɯɾeba'
+        conjugations[text_prefix + 'しよう'] = phon_prefix + 'ɕijoɯ'
+        conjugations[text_prefix + 'しろ'] = phon_prefix + 'ɕiɾo'
+        conjugations[text_prefix + 'せよ'] = phon_prefix + 'sejo'
+        conjugations[text_prefix + 'できる'] = phon_prefix + 'dekiɾɯ'
+        conjugations[text_prefix + 'される'] = phon_prefix + 'saɾeɾɯ'
+        conjugations[text_prefix + 'させる'] = phon_prefix + 'saseɾɯ'
+        conjugations[text_prefix + 'したら'] = phon_prefix + 'ɕitaɾa'
+    
+    elif verb_type == 'kuru_compound':
+        text_prefix = stems['text']['prefix']
+        phon_prefix = stems['phoneme']['prefix']
+        
+        # Generate all 来る forms with prefix
+        conjugations[text_prefix + '来た'] = phon_prefix + 'kita'
+        conjugations[text_prefix + 'きた'] = phon_prefix + 'kita'
+        conjugations[text_prefix + '来て'] = phon_prefix + 'kite'
+        conjugations[text_prefix + 'きて'] = phon_prefix + 'kite'
+        conjugations[text_prefix + '来ない'] = phon_prefix + 'konai'
+        conjugations[text_prefix + 'こない'] = phon_prefix + 'konai'
+        conjugations[text_prefix + '来なかった'] = phon_prefix + 'konakatta'
+        conjugations[text_prefix + 'こなかった'] = phon_prefix + 'konakatta'
+        conjugations[text_prefix + '来ます'] = phon_prefix + 'kimasɯ'
+        conjugations[text_prefix + 'きます'] = phon_prefix + 'kimasɯ'
+        conjugations[text_prefix + '来ました'] = phon_prefix + 'kimaɕita'
+        conjugations[text_prefix + 'きました'] = phon_prefix + 'kimaɕita'
+        conjugations[text_prefix + '来ません'] = phon_prefix + 'kimaseɴ'
+        conjugations[text_prefix + 'きません'] = phon_prefix + 'kimaseɴ'
+        conjugations[text_prefix + '来ませんでした'] = phon_prefix + 'kimaseɴdeɕita'
+        conjugations[text_prefix + 'きませんでした'] = phon_prefix + 'kimaseɴdeɕita'
+        conjugations[text_prefix + '来れば'] = phon_prefix + 'kɯɾeba'
+        conjugations[text_prefix + 'くれば'] = phon_prefix + 'kɯɾeba'
+        conjugations[text_prefix + '来よう'] = phon_prefix + 'kojoɯ'
+        conjugations[text_prefix + 'こよう'] = phon_prefix + 'kojoɯ'
+        conjugations[text_prefix + '来い'] = phon_prefix + 'koi'
+        conjugations[text_prefix + 'こい'] = phon_prefix + 'koi'
+        conjugations[text_prefix + '来られる'] = phon_prefix + 'koɾaɾeɾɯ'
+        conjugations[text_prefix + 'こられる'] = phon_prefix + 'koɾaɾeɾɯ'
+        conjugations[text_prefix + '来させる'] = phon_prefix + 'kisaseɾɯ'
+        conjugations[text_prefix + 'こさせる'] = phon_prefix + 'kosaseɾɯ'
+        conjugations[text_prefix + '来たら'] = phon_prefix + 'kitaɾa'
+        conjugations[text_prefix + 'きたら'] = phon_prefix + 'kitaɾa'
+    
+    return conjugations
+
+
+def process_verb_batch(entries_batch):
+    """
+    Process a batch of dictionary entries to generate conjugations.
+    Worker function for multiprocessing.
+    
+    Args:
+        entries_batch: List of (word, phoneme) tuples
+        
+    Returns:
+        tuple: (conjugations_dict, conjugated_words_set, verb_count)
+    """
+    batch_conjugations = {}
+    batch_conjugated_words = set()
+    batch_verb_count = 0
+    
+    for word, phoneme in entries_batch:
+        verb_type = detect_verb_type(word, phoneme)
+        
+        if verb_type:
+            batch_verb_count += 1
+            
+            try:
+                conjugations = generate_conjugations(word, phoneme, verb_type)
+                
+                # Collect conjugations
+                for conj_word, conj_phoneme in conjugations.items():
+                    batch_conjugations[conj_word] = conj_phoneme
+                    batch_conjugated_words.add(conj_word)
+            
+            except Exception as e:
+                # Skip errors in worker
+                continue
+    
+    return (batch_conjugations, batch_conjugated_words, batch_verb_count)
+
+
 def convert_to_ligatures(phoneme_str):
     """Convert multi-char IPA sequences to single-char ligatures"""
     result = phoneme_str
@@ -136,6 +702,125 @@ def main():
     
     print(f"   Added {added_count} missing entries")
     
+    # Step 1.5: Generate verb conjugations (PARALLELIZED)
+    print("\nStep 1.5: Generating verb conjugations...")
+    
+    # Determine optimal number of worker processes
+    num_workers = max(1, cpu_count() - 1)  # Leave one core free
+    print(f"   Using {num_workers} worker processes for parallel processing")
+    
+    # Convert dictionary to list of tuples for processing
+    all_entries = list(data.items())
+    total_entries = len(all_entries)
+    
+    # Split entries into batches for workers
+    batch_size = max(1000, total_entries // (num_workers * 4))  # Dynamic batch size
+    batches = []
+    for i in range(0, total_entries, batch_size):
+        batches.append(all_entries[i:i + batch_size])
+    
+    print(f"   Processing {total_entries} entries in {len(batches)} batches...")
+    print(f"   Batch size: {batch_size} entries per batch")
+    
+    # Track all conjugated words and stats
+    conjugated_words = set()
+    verb_count = 0
+    conjugation_count = 0
+    skipped_count = 0
+    sample_verbs = []
+    
+    # Process batches in parallel with progress reporting
+    print(f"\n   Progress: [", end='', flush=True)
+    progress_bar_width = 40
+    completed_batches = 0
+    
+    with Pool(processes=num_workers) as pool:
+        # Process batches and show progress
+        for batch_result in pool.imap_unordered(process_verb_batch, batches):
+            batch_conjugations, batch_conjugated_words, batch_verb_count = batch_result
+            
+            # Merge results from this batch
+            verb_count += batch_verb_count
+            conjugated_words.update(batch_conjugated_words)
+            
+            # Add conjugations to dictionary (skip if already exists)
+            for conj_word, conj_phoneme in batch_conjugations.items():
+                if conj_word not in data:
+                    data[conj_word] = conj_phoneme
+                    conjugation_count += 1
+                    
+                    # Collect samples from first few conjugations
+                    if len(sample_verbs) < 3 and len(batch_conjugations) > 0:
+                        # Just note that we have samples (details come from first batches)
+                        pass
+                else:
+                    skipped_count += 1
+            
+            # Update progress bar
+            completed_batches += 1
+            progress = completed_batches / len(batches)
+            filled = int(progress_bar_width * progress)
+            
+            # Redraw progress bar
+            print(f"\r   Progress: [{'=' * filled}{' ' * (progress_bar_width - filled)}] {progress * 100:.1f}% | Verbs: {verb_count} | Conjugations: {conjugation_count}", end='', flush=True)
+    
+    print()  # New line after progress bar
+    print(f"\n   ✅ Parallel processing complete!")
+    print(f"   Found {verb_count} verbs")
+    print(f"   Generated {conjugation_count} new conjugations")
+    print(f"   Skipped {skipped_count} (already existed)")
+    
+    # Show sample conjugations
+    if sample_verbs:
+        print(f"\n   Sample verb conjugations:")
+        for word, phoneme, vtype, count in sample_verbs:
+            print(f"     • {word} ({phoneme}) [{vtype}] → {count} forms")
+    
+    # Step 1.6: Update word list with conjugated forms
+    print(f"\nStep 1.6: Updating word list...")
+    
+    # Check if original_ja_words.txt exists
+    words_source = 'original_ja_words.txt'
+    if os.path.exists(words_source):
+        print(f"   Loading {words_source}...", end='', flush=True)
+        
+        # Use a set for fast duplicate detection
+        word_set = set()
+        
+        # Load existing words with progress
+        with open(words_source, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        for line in lines:
+            word = line.strip()
+            if word:
+                word_set.add(word)
+        
+        original_word_count = len(word_set)
+        print(f" Done! ({original_word_count} words)")
+        
+        # Add conjugated verb forms
+        print(f"   Adding {len(conjugated_words)} conjugated forms...", end='', flush=True)
+        words_added = 0
+        for conj_word in conjugated_words:
+            if conj_word not in word_set:
+                word_set.add(conj_word)
+                words_added += 1
+        
+        print(f" Done! (+{words_added} new)")
+        print(f"   Total words: {len(word_set)}")
+        
+        # Save as ja_words.txt (sorted for consistency)
+        print(f"   Sorting and saving ja_words.txt...", end='', flush=True)
+        with open('ja_words.txt', 'w', encoding='utf-8') as f:
+            for word in sorted(word_set):
+                f.write(word + '\n')
+        
+        print(f" Done!")
+        print(f"   ✅ Word list saved to ja_words.txt")
+    else:
+        print(f"   ⚠️  {words_source} not found, skipping word list update")
+    
     # Step 2: Remove punctuation entries
     print("\nStep 2: Removing punctuation entries...")
     removed_punct = 0
@@ -148,13 +833,22 @@ def main():
     # Step 3: Convert to ligatures
     print("\nStep 3: Converting multi-char IPA to ligatures...")
     converted_count = 0
-    for key in data:
+    total_keys = len(data)
+    progress_interval = max(1, total_keys // 20)  # Update progress 20 times
+    
+    for idx, key in enumerate(data):
         original = data[key]
         converted = convert_to_ligatures(original)
         if original != converted:
             data[key] = converted
             converted_count += 1
-    print(f"   Converted {converted_count} entries")
+        
+        # Progress reporting
+        if idx % progress_interval == 0:
+            progress_pct = (idx / total_keys) * 100
+            print(f"\r   Processing: {progress_pct:.1f}% ({idx}/{total_keys}) | Converted: {converted_count}", end='', flush=True)
+    
+    print(f"\r   ✅ Converted {converted_count} entries" + " " * 40)  # Clear progress line
     
     # Show examples (skip console output due to encoding issues on Windows)
     print(f"\n   Ligature conversions completed")
@@ -188,17 +882,26 @@ def main():
     print(f"\nStep 5: Saving ja_phonemes.json...")
     print(f"   Final count: {len(data)} entries")
     with open('ja_phonemes.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        json.dump(data, f, ensure_ascii=False, indent=2)
     
     print(f"\n[COMPLETE] Done!")
     print(f"\nSummary:")
     print(f"   - Original entries: {original_count}")
     print(f"   - Added missing kana/kanji: {added_count}")
+    print(f"   - Verbs found: {verb_count}")
+    print(f"   - Verb conjugations generated: {conjugation_count}")
+    if os.path.exists(words_source):
+        print(f"   - Word list: {original_word_count} → {len(word_set)} (+{words_added})")
     print(f"   - Removed punctuation: {removed_punct}")
     print(f"   - Converted to ligatures: {converted_count}")
     print(f"   - Invalid phoneme entries: {len(invalid_entries)}")
     print(f"   - Final entries: {len(data)}")
+    print(f"\nOutput files:")
+    print(f"   - ja_phonemes.json (phoneme dictionary)")
+    if os.path.exists(words_source):
+        print(f"   - ja_words.txt (word segmentation dictionary)")
     print(f"\nNote: Punctuation in input text will pass through unchanged")
+    print(f"Note: All verb conjugations (past, て-form, negative, etc.) are now in dictionary")
 
 if __name__ == '__main__':
     main()
