@@ -18,17 +18,17 @@ echo.
 
 echo Test 3: あの男「おとこ」さんは昨日「きのう」来「き」られました。
 jpn_to_phoneme_cpp.exe "あの男「おとこ」さんは昨日「きのう」来「き」られました。"
-echo Expected: ano otoko saɴ wa kinoɯ koɾaɾe maɕita 。
+echo Expected: ano otoko saɴ wa kinoɯ kiɾaɾe maɕita 。
 echo.
 
 echo Test 4: それ、今日「きょう」食「た」べる？
 jpn_to_phoneme_cpp.exe "それ、今日「きょう」食「た」べる？"
-echo Expected: sore 、 kijoɯ tabeɾɯ ？
+echo Expected: soɾe 、 kijoɯ tabeɾɯ ？
 echo.
 
 echo Test 5: それは今日「きょう」食「た」べますか
 jpn_to_phoneme_cpp.exe "それは今日「きょう」食「た」べますか"
-echo Expected: sore wa kijoɯ tabemaɕɯ ka
+echo Expected: soɾe wa kijoɯ tabemasɯ ka
 echo.
 
 echo Test 6: 拓真「たくま」、今晩「こんばん」ゲームしようぜ
@@ -63,7 +63,7 @@ echo.
 
 echo Test 12: 健太「けんた」、夜「よる」は空気「くうき」がすごく冷たいよ
 jpn_to_phoneme_cpp.exe "健太「けんた」、夜「よる」は空気「くうき」がすごく冷たいよ"
-echo Expected: keɴta 、 joɾɯ wa kɯɯki ga sɯgokɯ ʦɯmetai jo
+echo Expected: keɴta 、 joɾɯ wa kɯɯki ga sɯgokɯ ʦɯbetai jo
 echo.
 
 echo Test 13: 智也「ともや」、今夜「こんや」の月「つき」すごく大きいよ

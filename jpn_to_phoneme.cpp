@@ -888,7 +888,7 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         
         // Find where the "word" (kanji) starts before the opening bracket
         // 🔥 BLAZING FAST BOUNDARY DETECTION USING PRE-DECODED CODE POINTS!
-        size_t word_start = pos;
+        size_t word_start = bracket_open; // Start from bracket and search backward
         size_t search_pos = bracket_open;
         
         // Helper lambda to check if code point is kana (inline for speed)
@@ -897,20 +897,17 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                    (cp >= 0x30A0 && cp <= 0x30FF);    // Katakana
         };
         
-        // Search backwards for word boundary using code points (much faster!)
+        // Search backwards to find the start of the kanji/word that has furigana
+        // Stop when we hit kana or punctuation (that marks the boundary)
         while (search_pos > pos) {
             search_pos--;
             uint32_t cp = chars[search_pos];
             
-            // Check if this is hiragana or katakana
+            // Check if this is hiragana or katakana - this marks word boundary
             if (is_kana_cp(cp)) {
-                // Check if there's another kana before this one
-                if (search_pos > pos && is_kana_cp(chars[search_pos - 1])) {
-                    // Two consecutive kana = boundary!
-                    word_start = search_pos + 1;
-                    break;
-                }
-                // Single kana - might be part of compound, keep going
+                // Kana found - word starts AFTER this character
+                word_start = search_pos + 1;
+                break;
             }
             
             // Check for Japanese punctuation boundaries (using code points)
@@ -934,9 +931,13 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 word_start = search_pos + 1;
                 break;
             }
+            
+            // If we've searched all the way back to pos, the word starts at pos
+            word_start = search_pos;
         }
         
         // Add text from current position up to where the word/kanji starts
+        // This captures particles and other text between furigana hints
         if (word_start > pos) {
             size_t start_byte = byte_positions[pos];
             size_t end_byte = byte_positions[word_start];
