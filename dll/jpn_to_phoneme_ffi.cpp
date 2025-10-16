@@ -255,7 +255,32 @@ public:
             
             if (match_length > 0) {
                 // Found a match - add phoneme and advance position
-                result += matched_phoneme.value();
+                
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                // SPECIAL CASE: は particle pronunciation exception
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                // When は (U+306F) appears by itself OR at the end of a token,
+                // it's almost always the particle は which is pronounced "wa" not "ha"
+                // Examples:
+                //   これは → "kore wa" (は at end = particle)
+                //   は → "wa" (standalone = particle)
+                //   はい → "hai" (not at end = regular ha sound)
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                std::string phoneme_to_use = matched_phoneme.value();
+                
+                // Check if は (U+306F = 0x306F) is by itself or at the end
+                const uint32_t HA_CODEPOINT = 0x306F;  // は
+                
+                if (match_length == 1 && chars[pos] == HA_CODEPOINT) {
+                    // Case 1: は appears by itself (standalone particle)
+                    phoneme_to_use = "wa";
+                } else if (match_length > 0 && chars[pos + match_length - 1] == HA_CODEPOINT) {
+                    // Case 2: は appears at the END of the matched token
+                    // This catches cases like これは where は is at the end
+                    phoneme_to_use = "wa";
+                }
+                
+                result += phoneme_to_use;
                 pos += match_length;
             } else {
                 // No match found - keep original character and continue
