@@ -209,6 +209,13 @@ public:
     PhonemeConverter() : root(std::make_unique<TrieNode>()), entry_count(0) {}
     
     /**
+     * Get root node for trie walking (used in word segmentation fallback)
+     */
+    TrieNode* get_root() const {
+        return root.get();
+    }
+    
+    /**
      * Build trie from JSON dictionary file
      * Optimized for fast construction from large datasets
      */
@@ -619,8 +626,10 @@ public:
      * 
      * This new version properly handles TextSegments with furigana hints,
      * treating each segment as an atomic unit during segmentation.
+     * 
+     * @param phoneme_root Optional phoneme trie root for fallback lookups
      */
-    std::vector<std::string> segment_from_segments(const std::vector<TextSegment>& segments) {
+    std::vector<std::string> segment_from_segments(const std::vector<TextSegment>& segments, TrieNode* phoneme_root = nullptr) {
         std::vector<std::string> words;
         
         // Process each segment
@@ -655,6 +664,7 @@ public:
                 }
                 
                 // Try to find longest word match starting at current position
+                // Check word dictionary first, then phoneme dictionary as fallback
                 size_t match_length = 0;
                 TrieNode* current = root.get();
                 
@@ -669,6 +679,25 @@ public:
                     // If this node marks end of word, it's a valid match
                     if (current->phoneme.has_value()) {
                         match_length = i - pos + 1;
+                    }
+                }
+                
+                // 🔥 FALLBACK: If word dictionary didn't find a match, try phoneme dictionary
+                if (match_length == 0 && phoneme_root != nullptr) {
+                    TrieNode* phoneme_current = phoneme_root;
+                    
+                    for (size_t i = pos; i < chars.size() && phoneme_current != nullptr; i++) {
+                        auto it = phoneme_current->children.find(chars[i]);
+                        if (it == phoneme_current->children.end()) {
+                            break;
+                        }
+                        
+                        phoneme_current = it->second.get();
+                        
+                        // If this node has a phoneme, it's a valid word
+                        if (phoneme_current->phoneme.has_value()) {
+                            match_length = i - pos + 1;
+                        }
                     }
                 }
                 
@@ -1037,9 +1066,9 @@ namespace SegmentedConversion {
         // 見「み」て → [TextSegment("見て")] (compound word detected)
         auto segments = parse_furigana_segments(japanese_text, &segmenter);
         
-        // 🔥 STEP 2: Segment into words using structured segments
+        // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
         // Furigana segments are treated as atomic units
-        auto words = segmenter.segment_from_segments(segments);
+        auto words = segmenter.segment_from_segments(segments, converter.get_root());
         
         // 🔥 STEP 3: Convert each word to phonemes
         std::string result;
@@ -1060,8 +1089,8 @@ namespace SegmentedConversion {
         // 🔥 STEP 1: Parse furigana hints into structured segments
         auto segments = parse_furigana_segments(japanese_text, &segmenter);
         
-        // 🔥 STEP 2: Segment into words using structured segments
-        auto words = segmenter.segment_from_segments(segments);
+        // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
+        auto words = segmenter.segment_from_segments(segments, converter.get_root());
         
         // 🔥 STEP 3: Convert each word to phonemes
         ConversionResult result;
