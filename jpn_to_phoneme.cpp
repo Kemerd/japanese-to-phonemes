@@ -457,6 +457,57 @@ public:
     WordSegmenter() : root(std::make_unique<TrieNode>()), word_count(0) {}
     
     /**
+     * Check if a word exists in the dictionary
+     * Returns true if the word is a complete entry
+     */
+    bool contains_word(const std::string& word) const {
+        if (word.empty()) return false;
+        
+        // Pre-decode UTF-8 to code points
+        std::vector<uint32_t> chars;
+        size_t byte_pos = 0;
+        
+        while (byte_pos < word.length()) {
+            unsigned char c = word[byte_pos];
+            uint32_t cp;
+            
+            if (c < 0x80) {
+                cp = c;
+                byte_pos++;
+            } else if ((c & 0xE0) == 0xC0) {
+                cp = ((c & 0x1F) << 6) | (word[byte_pos + 1] & 0x3F);
+                byte_pos += 2;
+            } else if ((c & 0xF0) == 0xE0) {
+                cp = ((c & 0x0F) << 12) | ((word[byte_pos + 1] & 0x3F) << 6) | (word[byte_pos + 2] & 0x3F);
+                byte_pos += 3;
+            } else if ((c & 0xF8) == 0xF0) {
+                cp = ((c & 0x07) << 18) | ((word[byte_pos + 1] & 0x3F) << 12) | 
+                     ((word[byte_pos + 2] & 0x3F) << 6) | (word[byte_pos + 3] & 0x3F);
+                byte_pos += 4;
+            } else {
+                byte_pos++;
+                continue;
+            }
+            
+            chars.push_back(cp);
+        }
+        
+        // Walk the trie
+        TrieNode* current = root.get();
+        
+        for (uint32_t cp : chars) {
+            auto it = current->children.find(cp);
+            if (it == current->children.end()) {
+                return false; // Path doesn't exist
+            }
+            current = it->second.get();
+        }
+        
+        // Check if this is a valid end-of-word node
+        return current->phoneme.has_value();
+    }
+    
+    /**
      * Load word list from text file (one word per line)
      * Builds trie for fast longest-match word segmentation
      */
@@ -547,6 +598,29 @@ public:
                 continue;
             }
             
+            // 🔥 CHECK FOR FURIGANA MARKERS (‹ U+2039)
+            // If we see a marker, grab everything until closing marker › as ONE unit
+            // This prevents breaking up marked names like ‹けんた›
+            if (cp == 0x2039) {
+                size_t marker_start = pos;
+                pos++; // Skip opening ‹
+                
+                // Find closing marker ›
+                while (pos < chars.size() && chars[pos] != 0x203A) {
+                    pos++;
+                }
+                
+                if (pos < chars.size() && chars[pos] == 0x203A) {
+                    pos++; // Include closing ›
+                }
+                
+                // Extract the entire marked section as a single unit
+                size_t start_byte = byte_positions[marker_start];
+                size_t end_byte = byte_positions[pos];
+                words.push_back(text.substr(start_byte, end_byte - start_byte));
+                continue; // Move to next token
+            }
+            
             // Try to find longest word match starting at current position
             size_t match_length = 0;
             TrieNode* current = root.get();
@@ -623,6 +697,208 @@ public:
     }
 };
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FURIGANA HINT PROCESSING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * Lightweight structure to hold parsed furigana hint information
+ * Used for efficient compound word detection and smart hint processing
+ */
+struct FuriganaHint {
+    size_t kanji_start;      // Start position of kanji/text in original string
+    size_t kanji_end;        // End position of kanji (just before 「)
+    size_t bracket_open;     // Position of opening bracket 「
+    size_t bracket_close;    // Position of closing bracket 」
+    std::string kanji;       // The kanji/text before bracket (e.g., "健太" or "見")
+    std::string reading;     // The reading inside brackets (e.g., "けんた" or "み")
+    
+    // Constructor for easy initialization
+    FuriganaHint(size_t k_start, size_t k_end, size_t b_open, size_t b_close,
+                 const std::string& k, const std::string& r)
+        : kanji_start(k_start), kanji_end(k_end), 
+          bracket_open(b_open), bracket_close(b_close),
+          kanji(k), reading(r) {}
+};
+
+
+/**
+ * Process furigana hints by replacing text「reading」with special markers.
+ * 
+ * This preserves furigana readings as single units during word segmentation.
+ * Uses marker characters (U+2039/U+203A ‹›) that are unlikely in normal text.
+ * 
+ * HOW IT WORKS:
+ * 1. Find patterns like: 健太「けんた」はバカ
+ * 2. Replace with markers: ‹けんた›はバカ
+ * 3. Markers prevent word segmentation from breaking up the name
+ * 4. Smart segmenter recognizes ‹けんた› as a "word" and treats は as a particle
+ * 5. Result: ‹けんた› は バカ (proper separation!)
+ * 6. Remove markers after processing: けんた は バカ ✅
+ * 
+ * SMART COMPOUND WORD DETECTION:
+ * - If kanji「reading」+following text forms a dictionary word, prefer dictionary
+ * - Example: 見「み」て → Check if 見て is a word → YES → Use 見て from dict (drop hint)
+ * - Example: 健太「けんた」て → Check if 健太て is a word → NO → Use ‹けんた›て (use hint)
+ * - This prevents forcing wrong readings when compounds exist in dictionary
+ * 
+ * WHY MARKERS ARE BRILLIANT:
+ * - No hardcoded particle lists needed (は、が、を、の、と, etc.)
+ * - Leverages existing smart segmentation algorithm
+ * - Grammar recognition is intrinsic, not explicit
+ * - Minimal code changes, maximum impact
+ * 
+ * @param text Input text with potential furigana hints (e.g., 健太「けんた」)
+ * @param segmenter Optional word segmenter for compound word detection
+ * @return Text with furigana applied and marked for segmentation (e.g., ‹けんた›)
+ */
+std::string process_furigana_hints(const std::string& text, WordSegmenter* segmenter = nullptr) {
+    // Manual parsing approach with smart compound word detection
+    // Find patterns: kanji「reading」→ check for compounds first
+    // Example: 見「み」て → Check if 見て is a word → YES → keep 見て
+    // Example: 健太「けんた」て → Check if 健太て is a word → NO → use ‹けんた›て
+    
+    std::string output;
+    size_t pos = 0;
+    
+    while (pos < text.length()) {
+        // Look for opening bracket 「 (U+300C: E3 80 8C in UTF-8)
+        size_t bracket_open = text.find("\u300C", pos);
+        
+        if (bracket_open == std::string::npos) {
+            // No more furigana hints, add rest of text
+            output += text.substr(pos);
+            break;
+        }
+        
+        // Look for closing bracket 」 (U+300D: E3 80 8D in UTF-8)
+        size_t bracket_close = text.find("\u300D", bracket_open);
+        
+        if (bracket_close == std::string::npos) {
+            // No closing bracket, add rest as-is
+            output += text.substr(pos);
+            break;
+        }
+        
+        // Find where the "word" (kanji) starts before the opening bracket
+        // Look backwards from bracket_open to find word boundary
+        // Word boundaries: start of string, space, or previous closing bracket」
+        size_t word_start = pos;
+        size_t search_pos = bracket_open;
+        
+        // Search backwards for word boundary
+        while (search_pos > pos) {
+            // Check for space or previous furigana bracket
+            if (search_pos >= 3) {
+                std::string check = text.substr(search_pos - 3, 3);
+                if (check == "\u300D" || check == " " || check == "\t" || check == "\n") {
+                    word_start = search_pos;
+                    break;
+                }
+            }
+            
+            // Move back one byte (we'll iterate through UTF-8 boundaries naturally)
+            if (search_pos > 0) {
+                search_pos--;
+            } else {
+                break;
+            }
+        }
+        
+        // Add text from current position up to where the word/kanji starts
+        if (word_start > pos) {
+            output += text.substr(pos, word_start - pos);
+        }
+        
+        // Extract the kanji and reading
+        std::string kanji = text.substr(word_start, bracket_open - word_start);
+        size_t reading_start = bracket_open + 3; // +3 bytes for UTF-8 encoded 「
+        size_t reading_length = bracket_close - reading_start;
+        std::string reading = text.substr(reading_start, reading_length);
+        
+        // Trim whitespace from reading
+        size_t trim_start = reading.find_first_not_of(" \t\n\r");
+        size_t trim_end = reading.find_last_not_of(" \t\n\r");
+        
+        if (trim_start == std::string::npos || reading.empty()) {
+            // Empty reading - skip the entire furigana hint
+            pos = bracket_close + 3;
+            continue;
+        }
+        
+        reading = reading.substr(trim_start, trim_end - trim_start + 1);
+        
+        // 🔥 SMART COMPOUND WORD DETECTION
+        // Check if kanji + following text forms a dictionary word
+        // This prioritizes dictionary compounds over forced furigana readings
+        
+        size_t after_bracket = bracket_close + 3; // Position after 」
+        bool used_compound = false;
+        
+        if (segmenter && after_bracket < text.length()) {
+            // Try progressively longer combinations: kanji+1char, kanji+2char, etc.
+            // We want to find the longest match that includes text after the bracket
+            size_t max_lookahead = std::min(text.length() - after_bracket, size_t(30)); // Check up to 30 bytes ahead
+            
+            for (size_t lookahead = 3; lookahead <= max_lookahead; lookahead += 3) {
+                // Extract kanji + following text
+                std::string compound = kanji + text.substr(after_bracket, lookahead);
+                
+                // Check if this compound is a single dictionary word
+                if (segmenter->contains_word(compound)) {
+                    // Found a compound word! Use it instead of the furigana hint
+                    output += compound;
+                    pos = after_bracket + lookahead;
+                    used_compound = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!used_compound) {
+            // No compound found, use the furigana hint with markers
+            // Wrap reading in markers: ‹reading›
+            // U+2039 = ‹ (single left-pointing angle quotation mark)
+            // U+203A = › (single right-pointing angle quotation mark)
+            output += "\u2039" + reading + "\u203A";
+            pos = bracket_close + 3;
+        }
+    }
+    
+    return output;
+}
+
+/**
+ * Remove furigana markers from text after processing.
+ * 
+ * Removes the ‹› markers used to preserve furigana readings as single units.
+ * This is called after word segmentation and phoneme conversion to clean up output.
+ * 
+ * Example: ‹keɴta› wa baka → keɴta wa baka
+ * 
+ * @param text Text with markers (e.g., ‹けんた›)
+ * @return Text without markers (e.g., けんた)
+ */
+std::string remove_furigana_markers(const std::string& text) {
+    std::string result = text;
+    
+    // Remove ‹ (U+2039) markers
+    // UTF-8 encoding of U+2039 is: E2 80 B9 (3 bytes)
+    size_t pos = 0;
+    while ((pos = result.find("\u2039", pos)) != std::string::npos) {
+        result.erase(pos, 3);  // UTF-8 encoding of U+2039 is 3 bytes
+    }
+    
+    // Remove › (U+203A) markers
+    // UTF-8 encoding of U+203A is: E2 80 BA (3 bytes)
+    pos = 0;
+    while ((pos = result.find("\u203A", pos)) != std::string::npos) {
+        result.erase(pos, 3);  // UTF-8 encoding of U+203A is 3 bytes
+    }
+    
+    return result;
+}
+
 /**
  * Helper functions for PhonemeConverter with word segmentation
  * Defined here after WordSegmenter class is complete
@@ -630,31 +906,52 @@ public:
 namespace SegmentedConversion {
     /**
      * Convert with word segmentation support
-     * Two-pass algorithm: 1) segment into words, 2) convert each word
+     * Three-pass algorithm with furigana hint processing:
+     * 1) Process furigana hints (健太「けんた」→ ‹けんた›)
+     * 2) Segment into words (‹けんた›はバカ → ‹けんた›、は、バカ)
+     * 3) Convert each word to phonemes (‹けんた› → ‹keɴta›)
+     * 4) Remove markers from final output (‹keɴta› → keɴta)
      * Returns phonemes with spaces between words
      */
     std::string convert_with_segmentation(PhonemeConverter& converter, const std::string& japanese_text, WordSegmenter& segmenter) {
-        // First pass: segment into words
-        auto words = segmenter.segment(japanese_text);
+        // 🔥 STEP 1: Process furigana hints with smart compound detection
+        // 健太「けんた」はバカ → ‹けんた›はバカ (marked as single unit)
+        // 見「み」て → 見て (compound word detected, use dictionary)
+        std::string processed_text = process_furigana_hints(japanese_text, &segmenter);
         
-        // Second pass: convert each word to phonemes
+        // 🔥 STEP 2: Segment into words with markers preserved
+        // ‹けんた›はバカ → [‹けんた›] [は] [バカ]
+        // Smart segmenter treats ‹けんた› as a word and は as a particle!
+        auto words = segmenter.segment(processed_text);
+        
+        // 🔥 STEP 3: Convert each word to phonemes (markers stay intact)
         std::string result;
         for (size_t i = 0; i < words.size(); i++) {
             if (i > 0) result += " ";  // Add space between words
             result += converter.convert(words[i]);
         }
         
+        // 🔥 STEP 4: Remove markers from final output
+        // ‹keɴta› wa baka → keɴta wa baka ✅
+        result = remove_furigana_markers(result);
+        
         return result;
     }
     
     /**
      * Convert with word segmentation and detailed information
+     * Includes furigana hint processing for proper name handling
      */
     ConversionResult convert_detailed_with_segmentation(PhonemeConverter& converter, const std::string& japanese_text, WordSegmenter& segmenter) {
-        // First pass: segment into words
-        auto words = segmenter.segment(japanese_text);
+        // 🔥 STEP 1: Process furigana hints with smart compound detection
+        // 健太「けんた」はバカ → ‹けんた›はバカ
+        // 見「み」て → 見て (compound word detected, use dictionary)
+        std::string processed_text = process_furigana_hints(japanese_text, &segmenter);
         
-        // Second pass: convert each word to phonemes
+        // 🔥 STEP 2: Segment into words with markers preserved
+        auto words = segmenter.segment(processed_text);
+        
+        // 🔥 STEP 3: Convert each word to phonemes
         ConversionResult result;
         size_t byte_offset = 0;
         
@@ -676,6 +973,9 @@ namespace SegmentedConversion {
             
             byte_offset += words[i].length();
         }
+        
+        // 🔥 STEP 4: Remove markers from final output
+        result.phonemes = remove_furigana_markers(result.phonemes);
         
         return result;
     }
