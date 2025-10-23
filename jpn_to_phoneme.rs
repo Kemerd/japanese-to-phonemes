@@ -841,7 +841,31 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>) -> Vec
             
             // Check if this is kana
             if is_kana(ch) {
-                // Check if there's ANY kanji before this position
+                // 🔥 ENHANCED LOGIC: Check if the kana sequence from here to the kanji is a word
+                // Example: "とても面白「おもしろ」" → "とても" is a word, stop here
+                // This prevents incorrectly treating standalone words as okurigana
+                
+                // Extract kana sequence from search_pos to bracket_open
+                let mut kana_seq_end = search_pos;
+                while kana_seq_end < bracket_open && is_kana(chars[kana_seq_end]) {
+                    kana_seq_end += 1;
+                }
+                
+                // If we have a kana sequence, check if it's a word
+                if kana_seq_end > search_pos {
+                    if let Some(seg) = segmenter {
+                        let kana_sequence: String = chars[search_pos..kana_seq_end].iter().collect();
+                        
+                        // Check if this kana sequence is a word in the dictionary
+                        if seg.contains_word(&kana_sequence) {
+                            // This kana sequence is a complete word → stop here
+                            word_start = search_pos + 1;
+                            break;
+                        }
+                    }
+                }
+                
+                // Not a word itself - check if there's ANY kanji before this position
                 let has_kanji_before = chars[pos..search_pos].iter().any(|&c| {
                     let code = c as u32;
                     code >= 0x4E00 || (code >= 0x3400 && code <= 0x9FFF)
