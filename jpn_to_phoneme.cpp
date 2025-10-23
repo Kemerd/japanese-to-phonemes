@@ -1584,8 +1584,10 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 std::cerr << "[DEBUG]   Trying kanji from pos " << try_start << ": \"" << kanji_from_here << "\"" << std::endl;
                 
                 // Check if kanji from this position + text after forms a compound
-                // Use segmenter first, fall back to phoneme_root
-                TrieNode* current = segmenter ? segmenter->get_root() : phoneme_root;
+                // IMPORTANT: Use phoneme_root, not empty segmenter!
+                // When binary trie is loaded, segmenter exists but is empty
+                TrieNode* current = phoneme_root ? phoneme_root : (segmenter ? segmenter->get_root() : nullptr);
+                std::cerr << "[DEBUG]     Using " << (phoneme_root ? "phoneme" : "segmenter") << " trie" << std::endl;
                 bool valid_path = true;
                 
                 // Walk through kanji characters from try_start
@@ -1742,28 +1744,47 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                     std::cerr << "[DEBUG]     Found phoneme for kanji: \"" << phoneme_value << "\"" << std::endl;
                     
                     // 🔥 FIX: We must verify the phoneme MATCHES our reading!
-                    // Convert the reading (hiragana/katakana) to phonemes and compare
-                    // Walk the phoneme trie with our reading to get its phoneme value
-                    TrieNode* reading_node = phoneme_root;
-                    bool reading_found = true;
+                    // Reading is hiragana/katakana, so look up EACH CHARACTER individually
+                    // and concatenate their phonemes
                     
-                    for (size_t r = reading_start; r < reading_end && reading_node != nullptr; r++) {
-                        auto r_it = reading_node->children.find(chars[r]);
-                        if (r_it == reading_node->children.end()) {
-                            reading_found = false;
-                            break;
-                        }
-                        reading_node = r_it->second.get();
+                    // Pre-decode the reading string to code points
+                    std::vector<uint32_t> reading_chars;
+                    size_t reading_byte_pos = 0;
+                    while (reading_byte_pos < reading.length()) {
+                        reading_chars.push_back(get_code_point_lambda(reading, reading_byte_pos));
                     }
                     
-                    // Only split if the phoneme for the substring matches the reading's phoneme
+                    // Look up phoneme for each reading character and concatenate
+                    std::string reading_phoneme;
+                    bool all_chars_found = true;
+                    for (uint32_t reading_cp : reading_chars) {
+                        // Look up this single character in the phoneme trie
+                        TrieNode* char_node = phoneme_root;
+                        auto char_it = char_node->children.find(reading_cp);
+                        if (char_it == char_node->children.end()) {
+                            all_chars_found = false;
+                            break;
+                        }
+                        char_node = char_it->second.get();
+                        
+                        // Get phoneme for this character
+                        if (char_node->phoneme.has_value() && !char_node->phoneme.value().empty()) {
+                            reading_phoneme += char_node->phoneme.value();
+                        } else {
+                            all_chars_found = false;
+                            break;
+                        }
+                    }
+                    
+                    // Compare concatenated reading phonemes with kanji phoneme
                     bool phonemes_match = false;
-                    if (reading_found && reading_node != nullptr && reading_node->phoneme.has_value()) {
-                        std::string reading_phoneme = reading_node->phoneme.value();
-                        phonemes_match = (phoneme_value == reading_phoneme);
-                        std::cerr << "[DEBUG]     Reading phoneme: \"" << reading_phoneme << "\", match: " << (phonemes_match ? "YES" : "NO") << std::endl;
+                    if (!all_chars_found) {
+                        std::cerr << "[DEBUG]     Could not find phonemes for all reading chars" << std::endl;
                     } else {
-                        std::cerr << "[DEBUG]     Reading not found in phoneme dict" << std::endl;
+                        phonemes_match = (phoneme_value == reading_phoneme);
+                        std::cerr << "[DEBUG]     Reading phoneme (char-by-char): \"" << reading_phoneme 
+                                 << "\", kanji: \"" << phoneme_value << "\", match: " 
+                                 << (phonemes_match ? "YES" : "NO") << std::endl;
                     }
                     
                     if (try_length < kanji_char_count && phonemes_match) {
