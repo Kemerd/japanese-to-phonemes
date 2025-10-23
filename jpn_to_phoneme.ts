@@ -1051,7 +1051,29 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
         }
         
         if (foundPath && current !== null && current.phoneme !== null) {
-          if (tryLength < kanjiCharCount) {
+          const phonemeValue = current.phoneme;
+          
+          // 🔥 FIX: We must verify the phoneme MATCHES our reading!
+          // Convert the reading (hiragana/katakana) to phonemes and compare
+          let readingNode: TrieNode | null = phonemeRoot;
+          let readingFound = true;
+          
+          for (let r = readingStart; r < readingEnd && readingNode !== null; r++) {
+            const rChild = readingNode.children.get(codePoints[r]);
+            if (!rChild) {
+              readingFound = false;
+              break;
+            }
+            readingNode = rChild;
+          }
+          
+          // Only split if the phoneme for the substring matches the reading's phoneme
+          const phonemesMatch = readingFound && 
+                                readingNode !== null && 
+                                readingNode.phoneme !== null &&
+                                phonemeValue === readingNode.phoneme;
+          
+          if (tryLength < kanjiCharCount && phonemesMatch) {
             if (tryStart > wordStart) {
               const prefixStartIdx = positions[wordStart];
               const prefixEndIdx = positions[tryStart];
@@ -1067,7 +1089,9 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
             wordStart = tryStart;
             break;
           }
-          break;
+          if (phonemesMatch) {
+            break;
+          }
         }
       }
     }

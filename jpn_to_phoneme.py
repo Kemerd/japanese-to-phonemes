@@ -392,8 +392,28 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                 
                 # Check if we found a valid entry
                 if found_path and current.phoneme is not None and current.phoneme != "":
+                    phoneme_value = current.phoneme
+                    
+                    # 🔥 FIX: We must verify the phoneme MATCHES our reading!
+                    # Convert the reading (hiragana/katakana) to phonemes and compare
+                    reading_node = phoneme_root
+                    reading_found = True
+                    
+                    for char in reading:
+                        char_code = ord(char)
+                        if char_code not in reading_node.children:
+                            reading_found = False
+                            break
+                        reading_node = reading_node.children[char_code]
+                    
+                    # Only split if the phoneme for the substring matches the reading's phoneme
+                    phonemes_match = False
+                    if reading_found and reading_node.phoneme is not None and reading_node.phoneme != "":
+                        reading_phoneme = reading_node.phoneme
+                        phonemes_match = (phoneme_value == reading_phoneme)
+                    
                     # Found a match! Check if we need to split
-                    if try_length < len(kanji):
+                    if try_length < len(kanji) and phonemes_match:
                         # Split: add prefix as normal text
                         if try_start > 0:
                             segments.append(TextSegment(text=kanji[:try_start]))
@@ -401,7 +421,8 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                         final_word_start = word_start + try_start
                         break
                     # If try_length == len(kanji), use the whole thing
-                    break
+                    if phonemes_match:
+                        break
         
         # Add the furigana segment
         segments.append(TextSegment(text=final_kanji, furigana_hint=reading))

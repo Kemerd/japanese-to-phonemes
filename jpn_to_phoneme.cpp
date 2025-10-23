@@ -1631,13 +1631,29 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 if (found_path && current != nullptr && current->phoneme.has_value()) {
                     std::string phoneme_value = current->phoneme.value();
                     
-                    // Compare the phoneme with our reading (convert reading to phonemes)
-                    // For now, do a simple check: if phoneme matches reading, we found it!
-                    // Actually, we need to convert the reading (hiragana) to see if it matches
-                    // But simpler: just check if the kanji sequence exists in phoneme dict
-                    // The fact that it exists means it's a valid segmentation point
+                    // 🔥 FIX: We must verify the phoneme MATCHES our reading!
+                    // Convert the reading (hiragana/katakana) to phonemes and compare
+                    // Walk the phoneme trie with our reading to get its phoneme value
+                    TrieNode* reading_node = phoneme_root;
+                    bool reading_found = true;
                     
-                    if (try_length < kanji_char_count) {
+                    for (size_t r = reading_start; r < reading_end && reading_node != nullptr; r++) {
+                        auto r_it = reading_node->children.find(chars[r]);
+                        if (r_it == reading_node->children.end()) {
+                            reading_found = false;
+                            break;
+                        }
+                        reading_node = r_it->second.get();
+                    }
+                    
+                    // Only split if the phoneme for the substring matches the reading's phoneme
+                    bool phonemes_match = false;
+                    if (reading_found && reading_node != nullptr && reading_node->phoneme.has_value()) {
+                        std::string reading_phoneme = reading_node->phoneme.value();
+                        phonemes_match = (phoneme_value == reading_phoneme);
+                    }
+                    
+                    if (try_length < kanji_char_count && phonemes_match) {
                         // We found a match that's SHORTER than the full kanji sequence!
                         // This means the furigana only applies to the SUFFIX
                         // Split: prefix as normal text + suffix with furigana

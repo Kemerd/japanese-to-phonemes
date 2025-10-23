@@ -1016,9 +1016,39 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
                     // Check if we found a valid entry
                     if found_path {
                         if let Some(node) = current {
-                            if node.phoneme.is_some() {
+                            if let Some(ref phoneme_value) = node.phoneme {
+                                // 🔥 FIX: We must verify the phoneme MATCHES our reading!
+                                // Convert the reading (hiragana/katakana) to phonemes and compare
+                                let mut reading_node = Some(phoneme_trie);
+                                let mut reading_found = true;
+                                
+                                for i in reading_start..reading_end {
+                                    if let Some(rnode) = reading_node {
+                                        reading_node = rnode.children.get(&chars[i]);
+                                        if reading_node.is_none() {
+                                            reading_found = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // Only split if the phoneme for the substring matches the reading's phoneme
+                                let phonemes_match = if reading_found {
+                                    if let Some(rnode) = reading_node {
+                                        if let Some(ref reading_phoneme) = rnode.phoneme {
+                                            phoneme_value == reading_phoneme
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+                                
                                 // Found a match! Check if we need to split
-                                if try_length < kanji_char_count {
+                                if try_length < kanji_char_count && phonemes_match {
                                     // Split: add prefix as NORMAL_TEXT
                                     if try_start > word_start {
                                         let prefix: String = chars[word_start..try_start].iter().collect();
@@ -1029,7 +1059,9 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
                                     break;
                                 }
                                 // If try_length == kanji_char_count, use the whole thing
-                                break;
+                                if phonemes_match {
+                                    break;
+                                }
                             }
                         }
                     }

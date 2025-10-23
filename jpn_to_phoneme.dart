@@ -864,8 +864,30 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
         
         // Check if we found a valid entry
         if (foundPath && current != null && current.phoneme != null && current.phoneme!.isNotEmpty) {
+          final phonemeValue = current.phoneme!;
+          
+          // 🔥 FIX: We must verify the phoneme MATCHES our reading!
+          // Convert the reading (hiragana/katakana) to phonemes and compare
+          TrieNode? readingNode = phonemeRoot;
+          bool readingFound = true;
+          
+          for (var r = readingStart; r < readingEnd && readingNode != null; r++) {
+            readingNode = readingNode.children[runes[r]];
+            if (readingNode == null) {
+              readingFound = false;
+              break;
+            }
+          }
+          
+          // Only split if the phoneme for the substring matches the reading's phoneme
+          final phonemesMatch = readingFound && 
+                                readingNode != null && 
+                                readingNode.phoneme != null &&
+                                readingNode.phoneme!.isNotEmpty &&
+                                phonemeValue == readingNode.phoneme;
+          
           // Found a match! Check if we need to split
-          if (tryLength < kanjiCharCount) {
+          if (tryLength < kanjiCharCount && phonemesMatch) {
             // Split: add prefix as NORMAL_TEXT
             if (tryStart > wordStart) {
               final prefix = String.fromCharCodes(runes.sublist(wordStart, tryStart));
@@ -876,7 +898,9 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
             break;
           }
           // If tryLength == kanjiCharCount, use the whole thing
-          break;
+          if (phonemesMatch) {
+            break;
+          }
         }
       }
     }

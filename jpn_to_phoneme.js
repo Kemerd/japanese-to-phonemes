@@ -1033,8 +1033,30 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
         
         // Check if we found a valid entry with matching reading
         if (foundPath && current !== null && current.phoneme !== null) {
+          const phonemeValue = current.phoneme;
+          
+          // 🔥 FIX: We must verify the phoneme MATCHES our reading!
+          // Convert the reading (hiragana/katakana) to phonemes and compare
+          let readingNode = phonemeRoot;
+          let readingFound = true;
+          
+          for (let r = readingStart; r < readingEnd && readingNode !== null; r++) {
+            const rChild = readingNode.children.get(codePoints[r]);
+            if (!rChild) {
+              readingFound = false;
+              break;
+            }
+            readingNode = rChild;
+          }
+          
+          // Only split if the phoneme for the substring matches the reading's phoneme
+          const phonemesMatch = readingFound && 
+                                readingNode !== null && 
+                                readingNode.phoneme !== null &&
+                                phonemeValue === readingNode.phoneme;
+          
           // Found a match! Check if we need to split
-          if (tryLength < kanjiCharCount) {
+          if (tryLength < kanjiCharCount && phonemesMatch) {
             // Split: add prefix as NORMAL_TEXT
             if (tryStart > wordStart) {
               const prefixStartIdx = positions[wordStart];
@@ -1052,7 +1074,9 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
             break;
           }
           // If tryLength == kanjiCharCount, use the whole thing (no split needed)
-          break;
+          if (phonemesMatch) {
+            break;
+          }
         }
       }
     }
