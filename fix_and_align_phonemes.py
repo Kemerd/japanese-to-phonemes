@@ -6,6 +6,7 @@ Fix and align ja_phonemes.json with tokenizer_vocab.json
 This script processes the phoneme dictionary to ensure compatibility with
 the tokenizer vocabulary and optimal performance:
 
+0. Fix particle は pronunciations (ha -> wa) in compounds like では, これは, etc.
 1. Add missing basic hiragana, katakana (including old forms), and common kanji
 2. Convert multi-character IPA sequences to single-character ligatures:
    - dʑ → ʥ (voiced alveolo-palatal affricate)
@@ -26,6 +27,7 @@ Output: ja_phonemes.json (cleaned and aligned dictionary)
 
 import json
 import os
+import re
 import shutil
 import struct
 from multiprocessing import Pool, cpu_count
@@ -834,6 +836,115 @@ def process_verb_batch(entries_batch):
     return (batch_conjugations, batch_conjugated_words, batch_verb_count)
 
 
+def fix_particle_ha_in_phoneme(kanji, phoneme):
+    """
+    Fix particle は (ha -> wa) in phoneme transcriptions.
+    
+    In Japanese, the particle は is pronounced as "wa" not "ha".
+    This fixes common patterns where は acts as a particle.
+    
+    Common patterns:
+    - では (dewa)
+    - には (niwa)  
+    - とは (towa)
+    - ては (tewa)
+    - からは (karawa)
+    - それでは (soredewa)
+    - これでは (koredewa)
+    - etc.
+    
+    Args:
+        kanji: The Japanese text
+        phoneme: The IPA phoneme transcription
+        
+    Returns:
+        str: Corrected phoneme transcription
+    """
+    # Pattern: Check if the kanji contains particle は patterns
+    # We need to be careful - only fix when は is clearly a particle
+    
+    particle_patterns = [
+        # ============================================================
+        # COMPOUND PARTICLE PATTERNS (では, には, etc.)
+        # ============================================================
+        (r'では', r'deha', r'dewa'),        # では -> dewa
+        (r'には', r'niha', r'niwa'),        # には -> niwa
+        (r'とは', r'toha', r'towa'),        # とは -> towa
+        (r'ては', r'teha', r'tewa'),        # ては -> tewa
+        (r'からは', r'kaɾaha', r'kaɾawa'),  # からは -> karawa
+        (r'までは', r'madeha', r'madewa'),  # までは -> madewa
+        (r'のでは', r'nodeha', r'nodewa'),  # のでは -> nodewa
+        (r'としては', r'toɕiteha', r'toɕitewa'),  # としては -> toshitewa
+        (r'にしては', r'niɕiteha', r'niɕitewa'),  # にしては -> nishitewa
+        (r'にあっては', r'niatːeha', r'niatːewa'),  # にあっては -> niattewa
+        (r'にかけては', r'nikaketeha', r'nikaketewa'),  # にかけては -> nikaketewa
+        (r'においては', r'nioiteha', r'nioitewa'),  # においては -> nioitewa
+        (r'さては', r'sateha', r'satewa'),  # さては -> satewa
+        (r'いっては', r'itːeha', r'itːewa'),  # いっては -> ittewa
+        (r'よっては', r'jotːeha', r'jotːewa'),  # よっては -> yottewa
+        (r'果ては', r'hateha', r'hatewa'),  # 果ては -> hatewa
+        (r'延いては', r'çiiteha', r'çiitewa'),  # 延いては -> hiitewa
+        
+        # ============================================================
+        # DEMONSTRATIVES + は (これは, それは, etc.)
+        # ============================================================
+        (r'それでは', r'soɾedeha', r'soɾedewa'),  # それでは -> soredewa
+        (r'これでは', r'koɾedeha', r'koɾedewa'),  # これでは -> koredewa
+        (r'あれでは', r'aɾedeha', r'aɾedewa'),  # あれでは -> aredewa
+        (r'どれでは', r'doɾedeha', r'doɾedewa'),  # どれでは -> doredewa
+        
+        (r'それは', r'soɾeha', r'soɾewa'),  # それは -> sorewa
+        (r'これは', r'koɾeha', r'koɾewa'),  # これは -> korewa
+        (r'あれは', r'aɾeha', r'aɾewa'),    # あれは -> arewa
+        (r'どれは', r'doɾeha', r'doɾewa'),  # どれは -> dorewa
+        
+        # ============================================================
+        # PRONOUNS + は (私は, 僕は, etc.)
+        # ============================================================
+        (r'私は', r'ɰᵝataɕiha', r'ɰᵝataɕiwa'),  # 私は -> watashiwa
+        (r'僕は', r'bokɯha', r'bokɯwa'),        # 僕は -> bokuwa
+        (r'俺は', r'oɾeha', r'oɾewa'),          # 俺は -> orewa
+        (r'彼は', r'kaɾeha', r'kaɾewa'),        # 彼は -> karewa
+        (r'彼女は', r'kanoʥoha', r'kanoʥowa'),  # 彼女は -> kanojowa
+        (r'誰は', r'daɾeha', r'daɾewa'),        # 誰は -> darewa
+        (r'何は', r'naniha', r'naniwa'),        # 何は -> naniwa
+        (r'君は', r'kimiha', r'kimiwa'),        # 君は -> kimiwa
+        (r'貴方は', r'anataha', r'anatawa'),    # 貴方は -> anatawa
+        (r'あなたは', r'anataha', r'anatawa'),  # あなたは -> anatawa
+        
+        # ============================================================
+        # COMMON WORDS + は
+        # ============================================================
+        (r'今日は', r'kjoɯha', r'kjoɯwa'),      # 今日は -> kyouwa
+        (r'明日は', r'aɕitaha', r'aɕitawa'),    # 明日は -> ashitawa
+        (r'昨日は', r'kinoɯha', r'kinoɯwa'),    # 昨日は -> kinouwa
+        (r'此処は', r'kokoha', r'kokowa'),      # 此処は -> kokowa
+        (r'ここは', r'kokoha', r'kokowa'),      # ここは -> kokowa
+        (r'其処は', r'sokoha', r'sokowa'),      # 其処は -> sokowa
+        (r'そこは', r'sokoha', r'sokowa'),      # そこは -> sokowa
+        (r'彼処は', r'asokoha', r'asokowa'),    # 彼処は -> asokowa
+        (r'あそこは', r'asokoha', r'asokowa'),  # あそこは -> asokowa
+        
+        # ============================================================
+        # NEGATIVE FORMS: はない and は無い (hanai -> wanai)
+        # These are very common and appear in many contexts
+        # ============================================================
+        (r'はない', r'hanai', r'wanai'),        # はない -> wanai (kana)
+        (r'は無い', r'hanai', r'wanai'),        # は無い -> wanai (kanji)
+        (r'はなかった', r'hanakatta', r'wanakatta'),  # はなかった -> wanakatta
+        (r'は無かった', r'hanakatta', r'wanakatta'),  # は無かった -> wanakatta
+    ]
+    
+    # Apply each pattern
+    for kanji_pattern, phoneme_old, phoneme_new in particle_patterns:
+        if re.search(kanji_pattern, kanji):
+            # Check if the old pattern exists in the phoneme
+            if phoneme_old in phoneme:
+                phoneme = phoneme.replace(phoneme_old, phoneme_new)
+    
+    return phoneme
+
+
 def convert_to_ligatures(phoneme_str):
     """Convert multi-char IPA sequences to single-char ligatures"""
     result = phoneme_str
@@ -1032,6 +1143,17 @@ def main():
     
     original_count = len(data)
     print(f"   Original entries: {original_count}")
+    
+    # Step 0.5: Fix particle は (ha -> wa) pronunciations
+    print("\nStep 0.5: Fixing particle ha (ha -> wa) pronunciations...")
+    particle_fixes = 0
+    for kanji in list(data.keys()):
+        original_phoneme = data[kanji]
+        fixed_phoneme = fix_particle_ha_in_phoneme(kanji, original_phoneme)
+        if original_phoneme != fixed_phoneme:
+            data[kanji] = fixed_phoneme
+            particle_fixes += 1
+    print(f"   Fixed {particle_fixes} particle pronunciations (ha -> wa)")
     
     # Step 1: Add/fix missing basic kana, numbers, and common characters
     print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, and common characters...")
@@ -1272,6 +1394,7 @@ def main():
     print(f"\n[COMPLETE] Done!")
     print(f"\nSummary:")
     print(f"   - Original entries: {original_count}")
+    print(f"   - Particle ha->wa fixes: {particle_fixes}")
     print(f"   - Added missing kana/kanji: {added_count}")
     print(f"   - Verbs found: {verb_count}")
     print(f"   - Verb conjugations generated: {conjugation_count}")
@@ -1286,7 +1409,8 @@ def main():
     if os.path.exists(words_source):
         print(f"   - ja_words.txt (word segmentation dictionary)")
         print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
-    print(f"\nNote: Punctuation in input text will pass through unchanged")
+    print(f"\nNote: Particle ha -> wa fixes applied (では->dewa, これは->korewa, etc.)")
+    print(f"Note: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
     print(f"Note: Use japanese.trie for instant C++ loading (same TrieNode* structure as JSON)!")
 
