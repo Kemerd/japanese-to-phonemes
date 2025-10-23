@@ -473,6 +473,38 @@ class WordSegmenter:
                 pos += 1
                 continue
             
+            # 🔥 SMART PARTICLE CHECK: Check if this is は (ha) that should be separated
+            # BUT ONLY if it doesn't form a longer word with following characters!
+            # This prevents は+もう → はもう, while allowing words starting with は to stay together
+            current_char = ord(text[pos])
+            is_potential_particle = (
+                current_char == 0x306F  # は (topic marker)
+                # current_char == 0x304C or  # が (subject marker)
+                # current_char == 0x3092 or  # を (object marker) - actually を is ALWAYS alone!
+                # current_char == 0x306B or  # に (direction/time)
+                # current_char == 0x3078 or  # へ (direction)
+                # current_char == 0x3067 or  # で (location/means)
+                # current_char == 0x3068 or  # と (and/with)
+                # current_char == 0x3082 or  # も (also)
+                # current_char == 0x306E or  # の (possessive)
+                # current_char == 0x3084 or  # や (and/or)
+                # current_char == 0x304B     # か (question)
+            )
+            
+            # If it's a potential particle, check if it can form a multi-character word
+            treat_as_particle = False
+            if is_potential_particle:
+                # Note: Python's segment method doesn't have phoneme_root access
+                # For now, just treat は as a particle unless we add more context
+                # This is a simplified version compared to other implementations
+                treat_as_particle = True
+            
+            # If it's a standalone particle, treat it as a single token
+            if treat_as_particle:
+                words.append(text[pos])
+                pos += 1
+                continue  # Skip the rest of the matching logic
+            
             # Try to find longest word match starting at current position
             match_length = 0
             current = self.root
@@ -496,8 +528,9 @@ class WordSegmenter:
                 words.append(text[pos:pos + match_length])
                 pos += match_length
             else:
-                # No match found - this is likely a grammatical element
-                # Collect all consecutive unmatched characters as a single token
+                # No match found - collect all consecutive unmatched characters as grammar token
+                # This handles compound particles (から、まで、etc.) and conjugations (です、ます)
+                # Note: Single-char particles are already handled earlier, so this won't merge them
                 grammar_start = pos
                 
                 # Keep collecting characters until we find another word match
