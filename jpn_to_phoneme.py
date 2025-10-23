@@ -211,7 +211,8 @@ class PhonemeConverter:
                     break
                 
                 # If this node has a phoneme, it's a valid match
-                if current.phoneme is not None:
+                # 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+                if current.phoneme is not None and current.phoneme != "":
                     match_length = i - pos + 1
                     matched_phoneme = current.phoneme
                 
@@ -253,7 +254,8 @@ class PhonemeConverter:
                 if current is None:
                     break
                 
-                if current.phoneme is not None:
+                # 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+                if current.phoneme is not None and current.phoneme != "":
                     match_length = i - pos + 1
                     matched_phoneme = current.phoneme
                 

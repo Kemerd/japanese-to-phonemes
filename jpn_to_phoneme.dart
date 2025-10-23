@@ -193,7 +193,8 @@ class PhonemeConverter {
         if (current == null) break;
         
         // If this node has a phoneme, it's a valid match
-        if (current.phoneme != null) {
+        // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+        if (current.phoneme != null && current.phoneme!.isNotEmpty) {
           matchLength = i - pos + 1;
           matchedPhoneme = current.phoneme;
         }
@@ -246,7 +247,8 @@ class PhonemeConverter {
         
         if (current == null) break;
         
-        if (current.phoneme != null) {
+        // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+        if (current.phoneme != null && current.phoneme!.isNotEmpty) {
           matchLength = i - pos + 1;
           matchedPhoneme = current.phoneme;
         }

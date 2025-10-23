@@ -743,7 +743,8 @@ public:
                 current = it->second.get();
                 
                 // If this node has a phoneme, it's a valid match
-                if (current->phoneme.has_value()) {
+                // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+                if (current->phoneme.has_value() && !current->phoneme.value().empty()) {
                     match_length = i - pos + 1;
                     matched_phoneme = current->phoneme;
                 }
@@ -812,7 +813,8 @@ public:
                 
                 current = it->second.get();
                 
-                if (current->phoneme.has_value()) {
+                // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+                if (current->phoneme.has_value() && !current->phoneme.value().empty()) {
                     match_length = i - pos + 1;
                     matched_phoneme = current->phoneme;
                 }
