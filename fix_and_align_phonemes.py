@@ -106,6 +106,24 @@ COMMON_KANJI = {
     '咲': 'saki',  # bloom/blossom
 }
 
+# Common verbs in hiragana (often missing from dictionaries since they have Kanji equivalents)
+# These will automatically get conjugated by the verb system
+COMMON_VERBS_HIRAGANA = {
+    'いる': 'iɾɯ',      # to exist/be (animate) - ichidan
+    'ある': 'aɾɯ',      # to exist/be (inanimate) - godan (already handled as special)
+    'やる': 'jaɾɯ',     # to do - godan
+    'なる': 'naɾɯ',     # to become - godan
+    'みる': 'miɾɯ',     # to see/look - ichidan
+    'きる': 'kiɾɯ',     # to wear - ichidan
+    'でる': 'deɾɯ',     # to go out/exit - ichidan
+    'ねる': 'neɾɯ',     # to sleep - ichidan
+    'たべる': 'tabeɾɯ', # to eat - ichidan
+    'のむ': 'nomɯ',     # to drink - godan
+    'いく': 'ikɯ',      # to go - godan (already handled as special)
+    'くる': 'kɯɾɯ',     # to come - irregular (already handled)
+    'する': 'sɯɾɯ',     # to do - irregular (already handled)
+}
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # JAPANESE NUMBERS SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -291,6 +309,8 @@ GODAN_ENDINGS = {
 
 # Godan て-form and た-form phoneme transformations
 # Format: ending_sound → (te_modification, te_suffix, ta_suffix)
+# IMPORTANT: Keys are the actual phoneme consonants extracted from verbs!
+# NOTE: Must handle BOTH multi-char sequences (before ligature conversion) AND ligatures!
 GODAN_TE_TA_MAP = {
     # く → いて/いた
     'k': ('i', 'te', 'ta'),      # 書く kakɯ → 書いて kaite → 書いた kaita
@@ -298,8 +318,9 @@ GODAN_TE_TA_MAP = {
     'g': ('i', 'de', 'da'),      # 泳ぐ ojogɯ → 泳いで ojoide → 泳いだ ojoida
     # す → して/した
     's': ('ɕi', 'te', 'ta'),     # 話す hanasɯ → 話して hanaɕite → 話した hanaɕita
-    # つ → って/った
-    't': ('tː', 'e', 'a'),       # 待つ maʦɯ → 待って matːe → 待った matːa
+    # つ → って/った (BOTH forms: before and after ligature conversion)
+    'ts': ('tː', 'e', 'a'),      # 待つ matsɯ → 待って matːe → 待った matːa  (before ligature)
+    'ʦ': ('tː', 'e', 'a'),       # 待つ maʦɯ → 待って matːe → 待った matːa  (after ligature)
     # ぬ → んで/んだ
     'n': ('ɴ', 'de', 'da'),      # 死ぬ ɕinɯ → 死んで ɕiɴde → 死んだ ɕiɴda
     # ぶ → んで/んだ
@@ -308,8 +329,16 @@ GODAN_TE_TA_MAP = {
     'm': ('ɴ', 'de', 'da'),      # 読む jomɯ → 読んで joɴde → 読んだ joɴda
     # る → って/った
     'ɾ': ('tː', 'e', 'a'),       # 走る haɕiɾɯ → 走って haɕitːe → 走った haɕitːa
-    # う → って/った (ɰ in phonemes)
-    'ɰ': ('tː', 'e', 'a'),       # 買う kaɰ → 買って katːe → 買った katːa
+    # う → って/った (ɰ not in phonemes for う-verbs, they end with just ɯ)
+    'ɯ': ('tː', 'e', 'a'),       # 買う kaɯ → 買って katːe → 買った katːa
+    
+    # Additional ligature forms (in case they appear in future data)
+    'dz': ('ɴ', 'de', 'da'),     # ず dzɯ → んで (before ligature)
+    'ʣ': ('ɴ', 'de', 'da'),      # ず ʣɯ → んで (after ligature)
+    'tɕ': ('tː', 'e', 'a'),      # ち tɕi → って (before ligature, rare for godan)
+    'ʨ': ('tː', 'e', 'a'),       # ち ʨi → って (after ligature, rare for godan)
+    'dʑ': ('ɴ', 'de', 'da'),     # じ dʑi → んで (before ligature, rare for godan)
+    'ʥ': ('ɴ', 'de', 'da'),      # じ ʥi → んで (after ligature, rare for godan)
 }
 
 # Text-level て-form and た-form transformations for godan verbs
@@ -387,25 +416,33 @@ def detect_verb_type(word, phoneme):
     if (word.endswith('来る') and len(word) > 2) or (word.endswith('くる') and len(word) > 2):
         return 'kuru_compound'
     
-    # Must end in る to be a verb
-    if not word.endswith('る'):
-        return None
+    # Check if word ends with any godan verb ending
+    godan_endings = ['う', 'く', 'ぐ', 'す', 'つ', 'ぬ', 'ぶ', 'む', 'る']
+    text_ending = word[-1] if word else ''
     
-    # Check for godan exceptions (verbs that look ichidan but aren't)
-    if word in GODAN_EXCEPTIONS:
+    if text_ending not in godan_endings:
+        return None  # Not a verb
+    
+    # Handle る-verbs (need to distinguish ichidan from godan)
+    if text_ending == 'る':
+        # Check for godan exceptions (verbs that look ichidan but aren't)
+        if word in GODAN_EXCEPTIONS:
+            return 'godan_ru'
+        
+        # Ichidan verbs: る preceded by い/え sound in PHONEME
+        # This is the key - we check the phoneme, not the text!
+        if phoneme.endswith('ɾɯ'):
+            phoneme_stem = phoneme[:-2]  # Remove ɾɯ
+            if len(phoneme_stem) > 0:
+                # Check if ends with 'i' or 'e' sound
+                if phoneme_stem.endswith('i') or phoneme_stem.endswith('e'):
+                    return 'ichidan'
+        
+        # Default to godan る-verb
         return 'godan_ru'
     
-    # Ichidan verbs: る preceded by い/え sound in PHONEME
-    # This is the key - we check the phoneme, not the text!
-    if phoneme.endswith('ɾɯ'):
-        phoneme_stem = phoneme[:-2]  # Remove ɾɯ
-        if len(phoneme_stem) > 0:
-            # Check if ends with 'i' or 'e' sound
-            if phoneme_stem.endswith('i') or phoneme_stem.endswith('e'):
-                return 'ichidan'
-    
-    # Default to godan る-verb
-    return 'godan_ru'
+    # All other endings are godan
+    return f'godan_{text_ending}'
 
 
 def get_verb_stems(word, phoneme, verb_type):
@@ -482,8 +519,40 @@ def get_verb_stems(word, phoneme, verb_type):
         # For most godan verbs, ending is consonant + ɯ
         if phoneme.endswith('ɯ'):
             if len(phoneme) >= 2:
-                phoneme_ending = phoneme[-2]  # The consonant before ɯ
-                phoneme_stem = phoneme[:-2]
+                # Special case for う-verbs: they end with vowel + ɯ  
+                # e.g., 買う (kaɯ), 言う (iɯ), 歌う (ɯtaɯ)
+                if text_ending == 'う':
+                    # For う-verbs, we use special marker 'ɯ' as the ending
+                    phoneme_ending = 'ɯ'
+                    phoneme_stem = phoneme[:-1]  # Keep the vowel in the stem
+                else:
+                    # Check for multi-character consonant sequences BEFORE ligature conversion
+                    # These appear in the original phoneme data
+                    multi_char_consonants = ['ts', 'dz', 'tɕ', 'dʑ', 'tʃ', 'dʒ']  # Ordered by length (all 2 chars)
+                    
+                    found_multi = False
+                    for mc in multi_char_consonants:
+                        if phoneme.endswith(mc + 'ɯ'):
+                            phoneme_ending = mc
+                            phoneme_stem = phoneme[:-len(mc)-1]  # Remove consonant + ɯ
+                            found_multi = True
+                            break
+                    
+                    if not found_multi:
+                        # Check for single-character ligatures AFTER ligature conversion
+                        ligature_consonants = ['ʦ', 'ʣ', 'ʨ', 'ʥ', 'ʧ', 'ʤ']
+                        found_ligature = False
+                        for lig in ligature_consonants:
+                            if len(phoneme) >= 2 and phoneme[-2] == lig:
+                                phoneme_ending = lig
+                                phoneme_stem = phoneme[:-2]
+                                found_ligature = True
+                                break
+                        
+                        if not found_ligature:
+                            # Normal single-character consonant
+                            phoneme_ending = phoneme[-2]  # The consonant before ɯ
+                            phoneme_stem = phoneme[:-2]
             else:
                 phoneme_ending = 'ɯ'
                 phoneme_stem = ''
@@ -830,7 +899,7 @@ def process_verb_batch(entries_batch):
                     batch_conjugated_words.add(conj_word)
             
             except Exception as e:
-                # Skip errors in worker
+                # Skip errors in worker (should be rare with proper handling)
                 continue
     
     return (batch_conjugations, batch_conjugated_words, batch_verb_count)
@@ -1126,7 +1195,7 @@ def build_simple_binary_format(phoneme_dict, word_set, output_path):
     print(f"   [OK] Binary format created!")
     print(f"   Size: {file_size:,} bytes ({file_size_mb:.2f} MB)")
     print(f"   Entries: {entry_count} (phonemes + words)")
-    print(f"   ⚡ C++ loads this DIRECTLY into TrieNode* using same insert() as JSON!")
+    print(f"   C++ loads this DIRECTLY into TrieNode* using same insert() as JSON!")
     
     return output_path
 
@@ -1155,8 +1224,8 @@ def main():
             particle_fixes += 1
     print(f"   Fixed {particle_fixes} particle pronunciations (ha -> wa)")
     
-    # Step 1: Add/fix missing basic kana, numbers, and common characters
-    print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, and common characters...")
+    # Step 1: Add/fix missing basic kana, numbers, common characters, and verbs
+    print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, common verbs, and characters...")
     added_count = 0
     numbers_added = 0
     numbers_fixed = 0
@@ -1166,9 +1235,10 @@ def main():
         **BASIC_HIRAGANA, 
         **BASIC_KATAKANA, 
         **COMMON_KANJI,
+        **COMMON_VERBS_HIRAGANA,  # Add common verbs in hiragana
     }
     
-    # Add basic kana/kanji (only if missing)
+    # Add basic kana/kanji/verbs (only if missing)
     for char, phoneme in all_basic_entries.items():
         if char not in data:
             data[char] = phoneme
@@ -1409,9 +1479,10 @@ def main():
     if os.path.exists(words_source):
         print(f"   - ja_words.txt (word segmentation dictionary)")
         print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
-    print(f"\nNote: Particle ha -> wa fixes applied (では->dewa, これは->korewa, etc.)")
+    print(f"\nNote: Particle ha -> wa fixes applied (de wa->dewa, kore wa->korewa, etc.)")
     print(f"Note: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
+    print(f"Note: Handles BOTH multi-char sequences (ts, dz, etc.) AND ligatures in verb conjugations")
     print(f"Note: Use japanese.trie for instant C++ loading (same TrieNode* structure as JSON)!")
 
 if __name__ == '__main__':

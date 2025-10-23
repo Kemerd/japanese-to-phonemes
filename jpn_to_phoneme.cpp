@@ -1500,7 +1500,14 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         if (word_start > pos) {
             size_t start_byte = byte_positions[pos];
             size_t end_byte = byte_positions[word_start];
-            segments.push_back(TextSegment(text.substr(start_byte, end_byte - start_byte), start_byte));
+            std::string between_text = text.substr(start_byte, end_byte - start_byte);
+            // DEBUG: Print what we're adding
+            std::cerr << "[DEBUG] Adding text between hints: \"" << between_text 
+                      << "\" (pos=" << pos << ", word_start=" << word_start << ")" << std::endl;
+            segments.push_back(TextSegment(between_text, start_byte));
+        } else {
+            // DEBUG: Why are we NOT adding text?
+            std::cerr << "[DEBUG] NOT adding text (word_start=" << word_start << " <= pos=" << pos << ")" << std::endl;
         }
         
         // Extract the kanji and reading using pre-decoded positions
@@ -1553,6 +1560,97 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         // Example: 五百円「えん」です → No honorific, so backtrack
         bool is_likely_name = false;
         size_t after_bracket = bracket_close + 1;
+        
+        // 🔥 SMART COMPOUND-AWARE KANJI BOUNDARY DETECTION
+        // Before going further, check if kanji forms a compound with text after bracket
+        // This helps us find the correct word boundaries
+        size_t best_kanji_start = word_start;
+        size_t best_compound_length = 0;
+        
+        if ((segmenter || phoneme_root) && after_bracket < chars.size()) {
+            // Debug what's after the bracket
+            size_t after_debug_start = byte_positions[after_bracket];
+            size_t after_debug_end = byte_positions[std::min(after_bracket + 10, chars.size())];
+            std::string after_text = text.substr(after_debug_start, after_debug_end - after_debug_start);
+            std::cerr << "[DEBUG] Text after bracket: \"" << after_text << "\"" << std::endl;
+            std::cerr << "[DEBUG] Checking for compound words starting from different positions..." << std::endl;
+            
+            // Try each position from word_start to bracket_open as potential kanji start
+            for (size_t try_start = word_start; try_start < bracket_open; try_start++) {
+                // Extract kanji from this position for debug
+                size_t kanji_debug_start = byte_positions[try_start];
+                size_t kanji_debug_end = byte_positions[bracket_open];
+                std::string kanji_from_here = text.substr(kanji_debug_start, kanji_debug_end - kanji_debug_start);
+                std::cerr << "[DEBUG]   Trying kanji from pos " << try_start << ": \"" << kanji_from_here << "\"" << std::endl;
+                
+                // Check if kanji from this position + text after forms a compound
+                // Use segmenter first, fall back to phoneme_root
+                TrieNode* current = segmenter ? segmenter->get_root() : phoneme_root;
+                bool valid_path = true;
+                
+                // Walk through kanji characters from try_start
+                for (size_t i = try_start; i < bracket_open && current != nullptr; i++) {
+                    auto it = current->children.find(chars[i]);
+                    if (it == current->children.end()) {
+                        valid_path = false;
+                        break;
+                    }
+                    current = it->second.get();
+                }
+                
+                // If we made it through the kanji, continue with text after bracket
+                size_t compound_length = 0;
+                if (valid_path && current != nullptr) {
+                    for (size_t i = after_bracket; i < chars.size() && current != nullptr; i++) {
+                        auto it = current->children.find(chars[i]);
+                        if (it == current->children.end()) {
+                            break;
+                        }
+                        current = it->second.get();
+                        
+                        // Check if this forms a valid word
+                        if (current->phoneme.has_value()) {
+                            // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+                            if (!current->phoneme.value().empty()) {
+                                compound_length = i - after_bracket + 1;
+                                // Extract text for debug
+                                size_t debug_start = byte_positions[try_start];
+                                size_t debug_end = byte_positions[i + 1];
+                                std::string compound_text = text.substr(debug_start, debug_end - debug_start);
+                                std::cerr << "[DEBUG]   Found compound from pos " << try_start << ": \"" 
+                                         << compound_text << "\" (length=" << compound_length << ")" << std::endl;
+                            }
+                        }
+                    }
+                }
+                
+                // Keep the position that gives the LONGEST compound
+                if (compound_length > best_compound_length) {
+                    best_compound_length = compound_length;
+                    best_kanji_start = try_start;
+                }
+            }
+            
+            if (best_compound_length > 0) {
+                std::cerr << "[DEBUG] Best compound found starting at pos " << best_kanji_start 
+                         << " with length " << best_compound_length << std::endl;
+                
+                // If we found a better start position, add any text between original word_start and new position
+                if (best_kanji_start > word_start) {
+                    size_t prefix_start_byte = byte_positions[word_start];
+                    size_t prefix_end_byte = byte_positions[best_kanji_start];
+                    std::string prefix_text = text.substr(prefix_start_byte, prefix_end_byte - prefix_start_byte);
+                    std::cerr << "[DEBUG] Adding prefix text before compound: \"" << prefix_text << "\"" << std::endl;
+                    segments.push_back(TextSegment(prefix_text, prefix_start_byte));
+                }
+                
+                // Update kanji to reflect the correct boundaries
+                word_start = best_kanji_start;
+                kanji_start_byte = byte_positions[word_start];
+                kanji = text.substr(kanji_start_byte, kanji_end_byte - kanji_start_byte);
+            }
+        }
+        
         if (after_bracket < chars.size()) {
             uint32_t next_char = chars[after_bracket];
             // Check for common honorifics and name indicators
@@ -1601,6 +1699,9 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
             size_t kanji_char_count = bracket_open - word_start;
             const size_t MAX_BACKTRACK = std::min(size_t(10), kanji_char_count);
             
+            std::cerr << "[DEBUG] Smart backtracking: kanji=\"" << kanji << "\", reading=\"" << reading 
+                      << "\", kanji_char_count=" << kanji_char_count << std::endl;
+            
             // Try matching from end backwards (starting with just last char, then last 2, etc.)
             for (size_t try_length = 1; try_length <= MAX_BACKTRACK; try_length++) {
                 size_t try_start = bracket_open - try_length;
@@ -1612,6 +1713,8 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 size_t try_start_byte = byte_positions[try_start];
                 size_t try_end_byte = byte_positions[bracket_open];
                 std::string kanji_substr = text.substr(try_start_byte, try_end_byte - try_start_byte);
+                
+                std::cerr << "[DEBUG]   Trying length " << try_length << ": \"" << kanji_substr << "\"" << std::endl;
                 
                 // Check if this substring has the reading in the phoneme dictionary
                 // Walk the trie to see if kanji_substr → reading
@@ -1628,8 +1731,15 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 }
                 
                 // Check if this path has a phoneme value that matches our reading
-                if (found_path && current != nullptr && current->phoneme.has_value()) {
+                if (!found_path) {
+                    std::cerr << "[DEBUG]     Path not found in trie" << std::endl;
+                } else if (current == nullptr) {
+                    std::cerr << "[DEBUG]     Current node is null" << std::endl;
+                } else if (!current->phoneme.has_value()) {
+                    std::cerr << "[DEBUG]     Node has no phoneme value" << std::endl;
+                } else {
                     std::string phoneme_value = current->phoneme.value();
+                    std::cerr << "[DEBUG]     Found phoneme for kanji: \"" << phoneme_value << "\"" << std::endl;
                     
                     // 🔥 FIX: We must verify the phoneme MATCHES our reading!
                     // Convert the reading (hiragana/katakana) to phonemes and compare
@@ -1651,6 +1761,9 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                     if (reading_found && reading_node != nullptr && reading_node->phoneme.has_value()) {
                         std::string reading_phoneme = reading_node->phoneme.value();
                         phonemes_match = (phoneme_value == reading_phoneme);
+                        std::cerr << "[DEBUG]     Reading phoneme: \"" << reading_phoneme << "\", match: " << (phonemes_match ? "YES" : "NO") << std::endl;
+                    } else {
+                        std::cerr << "[DEBUG]     Reading not found in phoneme dict" << std::endl;
                     }
                     
                     if (try_length < kanji_char_count && phonemes_match) {
@@ -1658,11 +1771,14 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                         // This means the furigana only applies to the SUFFIX
                         // Split: prefix as normal text + suffix with furigana
                         
+                        std::cerr << "[DEBUG]     SPLITTING! Prefix length: " << (try_start - word_start) << std::endl;
+                        
                         // Add PREFIX as normal text
                         if (try_start > word_start) {
                             size_t prefix_start_byte = byte_positions[word_start];
                             size_t prefix_end_byte = byte_positions[try_start];
                             std::string prefix_text = text.substr(prefix_start_byte, prefix_end_byte - prefix_start_byte);
+                            std::cerr << "[DEBUG]     Adding prefix: \"" << prefix_text << "\"" << std::endl;
                             segments.push_back(TextSegment(prefix_text, prefix_start_byte));
                         }
                         
@@ -1681,60 +1797,40 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
             }
         }
         
-        // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
-        // Walk the trie starting from kanji to find the longest compound word
-        // after_bracket already declared above for name detection
+        // 🔥 USE COMPOUND DETECTION RESULT
+        // If we found a compound earlier, use it. Otherwise, proceed with furigana hint
         bool used_compound = false;
         
-        if (segmenter && after_bracket < chars.size()) {
-            // Use trie to find longest match starting from word_start position
-            // This naturally implements longest-match algorithm
-            size_t match_length = 0;
-            TrieNode* current = segmenter->get_root();
-            
-            // Walk trie through kanji characters first
-            for (size_t i = word_start; i < bracket_open && current != nullptr; i++) {
-                auto it = current->children.find(chars[i]);
-                if (it == current->children.end()) {
-                    break;
-                }
-                current = it->second.get();
-            }
-            
-            // Continue walking through characters after the bracket
-            if (current != nullptr) {
-                for (size_t i = after_bracket; i < chars.size() && current != nullptr; i++) {
-                    auto it = current->children.find(chars[i]);
-                    if (it == current->children.end()) {
-                        break;
-                    }
-                    current = it->second.get();
-                    
-                    // Check if this position marks a valid word ending
-                    if (current->phoneme.has_value()) {
-                        // Found a compound! Track it as the longest so far
-                        match_length = i - after_bracket + 1;
-                    }
-                }
-            }
-            
-            // If we found a compound word, use it with the furigana reading replacing the kanji
-            // This ensures that 来「き」た becomes "きた" not "来た" for phoneme conversion
-            if (match_length > 0) {
-                size_t compound_end_byte = byte_positions[after_bracket + match_length];
-                // 🔥 KEY FIX: Use the furigana READING instead of kanji!
-                std::string compound = reading + text.substr(byte_positions[after_bracket], 
-                                                             compound_end_byte - byte_positions[after_bracket]);
-                segments.push_back(TextSegment(compound, kanji_start_byte));
-                pos = after_bracket + match_length;
-                used_compound = true;
-            }
+        if (best_compound_length > 0) {
+            // We found a compound! Use the furigana reading + text after bracket
+            size_t compound_end_byte = byte_positions[after_bracket + best_compound_length];
+            // 🔥 KEY FIX: Use the furigana READING instead of kanji!
+            std::string compound = reading + text.substr(byte_positions[after_bracket], 
+                                                         compound_end_byte - byte_positions[after_bracket]);
+            std::cerr << "[DEBUG] Using compound: \"" << compound << "\"" << std::endl;
+            segments.push_back(TextSegment(compound, kanji_start_byte));
+            pos = after_bracket + best_compound_length;
+            used_compound = true;
         }
         
         if (!used_compound) {
             // No compound found, use the furigana hint
+            std::cerr << "[DEBUG] Adding furigana hint: text=\"" << kanji << "\", reading=\"" << reading << "\"" << std::endl;
             segments.push_back(TextSegment(kanji, reading, kanji_start_byte));
             pos = bracket_close + 1;
+        } else {
+            std::cerr << "[DEBUG] Used compound, advanced to pos=" << pos << std::endl;
+        }
+    }
+    
+    // DEBUG: Print final segments
+    std::cerr << "[DEBUG] Final segments (" << segments.size() << "):" << std::endl;
+    for (size_t i = 0; i < segments.size(); i++) {
+        if (segments[i].type == SegmentType::FURIGANA_HINT) {
+            std::cerr << "  [" << i << "] FURIGANA: text=\"" << segments[i].text 
+                      << "\", reading=\"" << segments[i].reading << "\"" << std::endl;
+        } else {
+            std::cerr << "  [" << i << "] NORMAL: \"" << segments[i].text << "\"" << std::endl;
         }
     }
     
