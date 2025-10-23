@@ -1489,6 +1489,42 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         size_t trimmed_end_byte = byte_positions[reading_start + trim_end];
         reading = text.substr(trimmed_start_byte, trimmed_end_byte - trimmed_start_byte);
         
+        // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+        // If we see さん、さま、様、君、ちゃん、くん etc. after the hint,
+        // the reading applies to the ENTIRE name, so skip backtracking!
+        // Example: 山本「やまもと」さん → Full reading applies to 山本
+        // Example: 五百円「えん」です → No honorific, so backtrack
+        bool is_likely_name = false;
+        size_t after_bracket = bracket_close + 1;
+        if (after_bracket < chars.size()) {
+            uint32_t next_char = chars[after_bracket];
+            // Check for common honorifics and name indicators
+            // さん(3055,3093), さま(3055,307E), 様(69D8), 君(541B), ちゃん(3061,3083,3093), くん(304F,3093)
+            // 氏(6C0F), 殿(6BBF), 先生(5148,751F), 師(5E2B), 教師(6559,5E2B), 講師(8B1B,5E2B)
+            // 会長(4F1A,9577), 社長(793E,9577), 部長(90E8,9577), 課長(8AB2,9577)
+            if (next_char == 0x3055) { // さ (could be さん or さま)
+                if (after_bracket + 1 < chars.size()) {
+                    uint32_t next_next = chars[after_bracket + 1];
+                    if (next_next == 0x3093 || next_next == 0x307E) { // ん or ま
+                        is_likely_name = true;
+                    }
+                }
+            } else if (next_char == 0x69D8 || next_char == 0x541B || // 様 or 君
+                       next_char == 0x6C0F || next_char == 0x6BBF) { // 氏 or 殿
+                is_likely_name = true;
+            } else if (next_char == 0x3061 || next_char == 0x304F) { // ち or く (ちゃん or くん)
+                is_likely_name = true;
+            } else if (next_char == 0x5148) { // 先 (先生)
+                is_likely_name = true;
+            } else if (next_char == 0x5E2B) { // 師 (teacher/master)
+                is_likely_name = true;
+            } else if (next_char == 0x6559 || next_char == 0x8B1B) { // 教 or 講 (教師 or 講師)
+                is_likely_name = true;
+            } else if (next_char == 0x9577) { // 長 (会長、社長、部長、課長 etc.)
+                is_likely_name = true;
+            }
+        }
+        
         // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
         // Algorithm: Given XYZ「ABC」, try matching ABC against:
         //   1. Just Z? If phoneme(Z) == ABC, split before Z
@@ -1500,13 +1536,13 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         //   - Try 円 → Check if phoneme(円) == えん → YES! Split before 円
         //   - Result: [五百] + [円「えん」]
         //
+        // SKIP backtracking if it's a name (honorific detected)!
+        //
         // This solves the problem where furigana only applies to PART of the kanji sequence!
         
-        if (phoneme_root) {
+        if (phoneme_root && !is_likely_name) {
             size_t kanji_char_count = bracket_open - word_start;
             const size_t MAX_BACKTRACK = std::min(size_t(10), kanji_char_count);
-            
-            std::cerr << "[DEBUG BACKTRACK] Starting backtrack: kanji_char_count=" << kanji_char_count << std::endl;
             
             // Try matching from end backwards (starting with just last char, then last 2, etc.)
             for (size_t try_length = 1; try_length <= MAX_BACKTRACK; try_length++) {
@@ -1519,8 +1555,6 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                 size_t try_start_byte = byte_positions[try_start];
                 size_t try_end_byte = byte_positions[bracket_open];
                 std::string kanji_substr = text.substr(try_start_byte, try_end_byte - try_start_byte);
-                
-                std::cerr << "[DEBUG BACKTRACK] Try length=" << try_length << " substr='" << kanji_substr << "'" << std::endl;
                 
                 // Check if this substring has the reading in the phoneme dictionary
                 // Walk the trie to see if kanji_substr → reading
@@ -1535,9 +1569,6 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                     }
                     current = it->second.get();
                 }
-                
-                std::cerr << "[DEBUG BACKTRACK] found_path=" << found_path 
-                          << " has_phoneme=" << (current && current->phoneme.has_value()) << std::endl;
                 
                 // Check if this path has a phoneme value that matches our reading
                 if (found_path && current != nullptr && current->phoneme.has_value()) {
@@ -1560,15 +1591,12 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
                             size_t prefix_end_byte = byte_positions[try_start];
                             std::string prefix_text = text.substr(prefix_start_byte, prefix_end_byte - prefix_start_byte);
                             segments.push_back(TextSegment(prefix_text, prefix_start_byte));
-                            std::cerr << "[DEBUG BACKTRACK] Added prefix segment: '" << prefix_text << "' at byte " << prefix_start_byte << std::endl;
                         }
                         
                         // Update kanji to only include the suffix
                         kanji_start_byte = try_start_byte;
                         kanji = kanji_substr;
                         word_start = try_start;
-                        
-                        std::cerr << "[DEBUG BACKTRACK] Updated kanji to suffix: '" << kanji << "' at byte " << kanji_start_byte << std::endl;
                         
                         // Found our split point, stop searching!
                         break;
@@ -1582,7 +1610,7 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         
         // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
         // Walk the trie starting from kanji to find the longest compound word
-        size_t after_bracket = bracket_close + 1; // Position after 」
+        // after_bracket already declared above for name detection
         bool used_compound = false;
         
         if (segmenter && after_bracket < chars.size()) {
@@ -1633,16 +1661,8 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
         if (!used_compound) {
             // No compound found, use the furigana hint
             segments.push_back(TextSegment(kanji, reading, kanji_start_byte));
-            std::cerr << "[DEBUG] Added furigana segment: kanji='" << kanji << "' reading='" << reading << "'" << std::endl;
             pos = bracket_close + 1;
         }
-    }
-    
-    std::cerr << "[DEBUG] Total segments created: " << segments.size() << std::endl;
-    for (size_t i = 0; i < segments.size(); i++) {
-        std::cerr << "[DEBUG]   Segment " << i << ": text='" << segments[i].text 
-                  << "' reading='" << segments[i].reading << "' type=" 
-                  << (int)segments[i].type << std::endl;
     }
     
     return segments;
