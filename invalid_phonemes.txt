@@ -1,0 +1,3 @@
+'形' -> 'katаʨi' (invalid: 'а')
+'側' -> 'soба' (invalid: 'б')
+'二十歳' -> 'hatаʨi' (invalid: 'а')
