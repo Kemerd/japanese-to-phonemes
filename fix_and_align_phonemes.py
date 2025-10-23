@@ -2095,6 +2095,7 @@ def main():
         print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
     print(f"\nNote: Particle ha -> wa fixes applied (de wa->dewa, kore wa->korewa, etc.)")
     print(f"Note: Standalone kanji use kun-yomi (水=mizu not sui, 山=yama not san, etc.)")
+    print(f"Note: Compound words use special readings (今日=kyou, 大人=otona, 明日=ashita, etc.)")
     print(f"Note: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
     print(f"Note: Handles BOTH multi-char sequences (ts, dz, etc.) AND ligatures in verb conjugations")
