@@ -1385,7 +1385,34 @@ std::vector<TextSegment> parse_furigana_segments(const std::string& text, WordSe
             bool is_kana_char = is_kana_cp(cp);
             
             if (is_kana_char) {
-                // Check if there's ANY non-kana (kanji) before this position
+                // 🔥 ENHANCED LOGIC: Check if the kana sequence from here to the kanji is a word
+                // Example: "とても面白「おもしろ」" → "とても" is a word, stop here
+                // This prevents incorrectly treating standalone words as okurigana
+                
+                // Extract kana sequence from search_pos to last_kanji_pos
+                size_t kana_seq_start = search_pos;
+                size_t kana_seq_end = search_pos;
+                
+                // Find the end of the kana sequence (stop at kanji or bracket)
+                while (kana_seq_end < bracket_open && is_kana_cp(chars[kana_seq_end])) {
+                    kana_seq_end++;
+                }
+                
+                // If we have a kana sequence, check if it's a word
+                if (kana_seq_end > kana_seq_start && segmenter) {
+                    size_t kana_start_byte = byte_positions[kana_seq_start];
+                    size_t kana_end_byte = byte_positions[kana_seq_end];
+                    std::string kana_sequence = text.substr(kana_start_byte, kana_end_byte - kana_start_byte);
+                    
+                    // Check if this kana sequence is a word in the dictionary
+                    if (segmenter->contains_word(kana_sequence)) {
+                        // This kana sequence is a complete word → stop here
+                        word_start = search_pos + 1;
+                        break;
+                    }
+                }
+                
+                // Not a word itself - check if there's ANY non-kana (kanji) before this position
                 bool has_kanji_before = false;
                 for (size_t check_pos = search_pos; check_pos > pos; check_pos--) {
                     if (!is_kana_cp(chars[check_pos - 1])) {
