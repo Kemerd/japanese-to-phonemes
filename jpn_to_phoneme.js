@@ -711,9 +711,10 @@ function isKana(codePoint) {
  * 
  * @param text Input text with potential furigana hints (e.g., 健太「けんた」)
  * @param segmenter Optional word segmenter for compound word detection
+ * @param phonemeRoot Optional phoneme trie root for hint backtracking
  * @return Array of text segments with furigana hints properly parsed
  */
-function parseFuriganaSegments(text, segmenter = null) {
+function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
   const segments = [];
   
   // 🔥 PRE-DECODE UTF-16 TO CODE POINTS FOR BLAZING SPEED!
@@ -899,9 +900,112 @@ function parseFuriganaSegments(text, segmenter = null) {
       continue;
     }
     
+    // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+    // If we see さん、さま、様、君、ちゃん、くん etc. after the hint,
+    // the reading applies to the ENTIRE name, so skip backtracking!
+    // Example: 山本「やまもと」さん → Full reading applies to 山本
+    // Example: 五百円「えん」です → No honorific, so backtrack
+    let isLikelyName = false;
+    const afterBracket = bracketClose + 1; // Position after 」
+    if (afterBracket < codePoints.length) {
+      const nextChar = codePoints[afterBracket];
+      // Check for common honorifics and name indicators
+      // さん(3055,3093), さま(3055,307E), 様(69D8), 君(541B), ちゃん(3061,3083,3093), くん(304F,3093)
+      // 氏(6C0F), 殿(6BBF), 先生(5148,751F), 師(5E2B), 教師(6559,5E2B), 講師(8B1B,5E2B)
+      // 会長(4F1A,9577), 社長(793E,9577), 部長(90E8,9577), 課長(8AB2,9577)
+      if (nextChar === 0x3055) { // さ (could be さん or さま)
+        if (afterBracket + 1 < codePoints.length) {
+          const nextNext = codePoints[afterBracket + 1];
+          if (nextNext === 0x3093 || nextNext === 0x307E) { // ん or ま
+            isLikelyName = true;
+          }
+        }
+      } else if (nextChar === 0x69D8 || nextChar === 0x541B || // 様 or 君
+                 nextChar === 0x6C0F || nextChar === 0x6BBF) { // 氏 or 殿
+        isLikelyName = true;
+      } else if (nextChar === 0x3061 || nextChar === 0x304F) { // ち or く (ちゃん or くん)
+        isLikelyName = true;
+      } else if (nextChar === 0x5148) { // 先 (先生)
+        isLikelyName = true;
+      } else if (nextChar === 0x5E2B) { // 師 (teacher/master)
+        isLikelyName = true;
+      } else if (nextChar === 0x6559 || nextChar === 0x8B1B) { // 教 or 講 (教師 or 講師)
+        isLikelyName = true;
+      } else if (nextChar === 0x9577) { // 長 (会長、社長、部長、課長 etc.)
+        isLikelyName = true;
+      }
+    }
+    
+    // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
+    // Algorithm: Given XYZ「ABC」, try matching ABC against:
+    //   1. Just Z? If phoneme(Z) == ABC, split before Z
+    //   2. Just YZ? If phoneme(YZ) == ABC, split before YZ
+    //   3. Just XYZ? If phoneme(XYZ) == ABC, use all of it
+    // Stop when we hit kana or reach limit (10 chars for safety)
+    //
+    // Example: 五百円「えん」
+    //   - Try 円 → Check if phoneme(円) == えん → YES! Split before 円
+    //   - Result: [五百] + [円「えん」]
+    //
+    // SKIP backtracking if it's a name (honorific detected)!
+    //
+    // This solves the problem where furigana only applies to PART of the kanji sequence!
+    let kanjiStartIdx = positions[wordStart];
+    let finalKanji = kanji;
+    
+    if (phonemeRoot && !isLikelyName) {
+      const kanjiCharCount = bracketOpen - wordStart;
+      const MAX_BACKTRACK = Math.min(10, kanjiCharCount);
+      
+      for (let tryLength = 1; tryLength <= MAX_BACKTRACK; tryLength++) {
+        const tryStart = bracketOpen - tryLength;
+        if (tryStart < wordStart) break;
+        
+        const tryStartIdx = positions[tryStart];
+        const tryEndIdx = positions[bracketOpen];
+        const kanjiSubstr = text.substring(tryStartIdx, tryEndIdx);
+        
+        // Try to match this kanji substring in the phoneme trie
+        let current = phonemeRoot;
+        let foundPath = true;
+        
+        for (let i = tryStart; i < bracketOpen && current !== null; i++) {
+          const child = current.children.get(codePoints[i]);
+          if (!child) {
+            foundPath = false;
+            break;
+          }
+          current = child;
+        }
+        
+        // Check if we found a valid entry with matching reading
+        if (foundPath && current !== null && current.phoneme !== null) {
+          // Found a match! Check if we need to split
+          if (tryLength < kanjiCharCount) {
+            // Split: add prefix as NORMAL_TEXT
+            if (tryStart > wordStart) {
+              const prefixStartIdx = positions[wordStart];
+              const prefixEndIdx = positions[tryStart];
+              segments.push({
+                type: SegmentType.NORMAL_TEXT,
+                text: text.substring(prefixStartIdx, prefixEndIdx),
+                reading: '',
+                originalPos: prefixStartIdx
+              });
+            }
+            kanjiStartIdx = tryStartIdx;
+            finalKanji = kanjiSubstr;
+            wordStart = tryStart;
+            break;
+          }
+          // If tryLength == kanjiCharCount, use the whole thing (no split needed)
+          break;
+        }
+      }
+    }
+    
     // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
     // Walk the trie starting from kanji to find the longest compound word
-    const afterBracket = bracketClose + 1; // Position after 」
     let usedCompound = false;
     
     if (segmenter && afterBracket < codePoints.length) {
@@ -951,7 +1055,7 @@ function parseFuriganaSegments(text, segmenter = null) {
       // No compound found, use the furigana hint
       segments.push({
         type: SegmentType.FURIGANA_HINT,
-        text: kanji,
+        text: finalKanji,
         reading: reading,
         originalPos: kanjiStartIdx
       });
@@ -976,7 +1080,7 @@ function convertWithSegmentation(converter, text, segmenter) {
   // 🔥 STEP 1: Parse furigana hints into structured segments
   // 健太「けんた」はバカ → [TextSegment("健太", "けんた"), TextSegment("はバカ")]
   // 見「み」て → [TextSegment("見て")] (compound word detected)
-  const segments = parseFuriganaSegments(text, segmenter);
+  const segments = parseFuriganaSegments(text, segmenter, converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   // Furigana segments are treated as atomic units
@@ -1005,7 +1109,7 @@ function convertWithSegmentation(converter, text, segmenter) {
  */
 function convertDetailedWithSegmentation(converter, text, segmenter) {
   // 🔥 STEP 1: Parse furigana hints into structured segments
-  const segments = parseFuriganaSegments(text, segmenter);
+  const segments = parseFuriganaSegments(text, segmenter, converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   const words = segmenter.segmentFromSegments(segments, converter.getRoot());

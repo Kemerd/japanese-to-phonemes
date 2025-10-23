@@ -767,7 +767,8 @@ fn is_kana(ch: char) -> bool {
 /// 
 /// @param text Input text with potential furigana hints (e.g., 健太「けんた」)
 /// @param segmenter Optional word segmenter for compound word detection
-fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>) -> Vec<TextSegment> {
+/// @param phoneme_root Optional phoneme trie root for hint backtracking
+fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phoneme_root: Option<&TrieNode>) -> Vec<TextSegment> {
     let mut segments = Vec::new();
     
     // Pre-decode UTF-8 to chars for blazing speed
@@ -900,8 +901,82 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>) -> Vec
             continue;
         }
         
-        // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
+        // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+        // If we see さん、さま、様、君、ちゃん、くん etc. after the hint,
+        // the reading applies to the ENTIRE name, so skip backtracking!
+        let mut is_likely_name = false;
         let after_bracket = bracket_close + 1;
+        if after_bracket < chars.len() {
+            let next_char = chars[after_bracket] as u32;
+            // Check for common honorifics
+            if next_char == 0x3055 { // さ
+                if after_bracket + 1 < chars.len() {
+                    let next_next = chars[after_bracket + 1] as u32;
+                    if next_next == 0x3093 || next_next == 0x307E { // ん or ま
+                        is_likely_name = true;
+                    }
+                }
+            } else if matches!(next_char, 0x69D8 | 0x541B | 0x6C0F | 0x6BBF | 0x5148 | 0x5E2B | 0x9577 | 0x3061 | 0x304F | 0x6559 | 0x8B1B) {
+                is_likely_name = true;
+            }
+        }
+        
+        // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
+        let mut final_kanji = kanji.clone();
+        let mut final_word_start = word_start;
+        
+        if let Some(phoneme_trie) = phoneme_root {
+            if !is_likely_name {
+                let kanji_char_count = bracket_open - word_start;
+                let max_backtrack = std::cmp::min(10, kanji_char_count);
+                
+                for try_length in 1..=max_backtrack {
+                    let try_start = bracket_open - try_length;
+                    if try_start < word_start {
+                        break;
+                    }
+                    
+                    let kanji_substr: String = chars[try_start..bracket_open].iter().collect();
+                    
+                    // Try to match this kanji substring in the phoneme trie
+                    let mut current = Some(phoneme_trie);
+                    let mut found_path = true;
+                    
+                    for i in try_start..bracket_open {
+                        if let Some(node) = current {
+                            current = node.children.get(&chars[i]);
+                            if current.is_none() {
+                                found_path = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Check if we found a valid entry
+                    if found_path {
+                        if let Some(node) = current {
+                            if node.phoneme.is_some() {
+                                // Found a match! Check if we need to split
+                                if try_length < kanji_char_count {
+                                    // Split: add prefix as NORMAL_TEXT
+                                    if try_start > word_start {
+                                        let prefix: String = chars[word_start..try_start].iter().collect();
+                                        segments.push(TextSegment::new_normal(prefix, byte_positions[word_start]));
+                                    }
+                                    final_kanji = kanji_substr;
+                                    final_word_start = try_start;
+                                    break;
+                                }
+                                // If try_length == kanji_char_count, use the whole thing
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
         let mut used_compound = false;
         
         if let Some(seg) = segmenter {
@@ -947,7 +1022,7 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>) -> Vec
         
         if !used_compound {
             // No compound found, use the furigana hint
-            segments.push(TextSegment::new_furigana(kanji, reading, byte_positions[word_start]));
+            segments.push(TextSegment::new_furigana(final_kanji, reading, byte_positions[final_word_start]));
             pos = bracket_close + 1;
         }
     }
@@ -961,7 +1036,7 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>) -> Vec
 /// Example: 健太「けんた」はバカ → kẽ̞ɴta wa baka
 fn convert_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter: &WordSegmenter) -> String {
     // 🔥 STEP 1: Parse furigana hints into structured segments
-    let segments = parse_furigana_segments(text, Some(segmenter));
+    let segments = parse_furigana_segments(text, Some(segmenter), Some(converter.get_root()));
     
     // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
     let words = segmenter.segment_from_segments(&segments, Some(converter.get_root()));
@@ -983,7 +1058,7 @@ fn convert_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter
 /// OPTIMIZED: Uses furigana-aware segmentation and は → wa particle handling
 fn convert_detailed_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter: &WordSegmenter) -> ConversionResult {
     // 🔥 STEP 1: Parse furigana hints into structured segments
-    let segments = parse_furigana_segments(text, Some(segmenter));
+    let segments = parse_furigana_segments(text, Some(segmenter), Some(converter.get_root()));
     
     // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
     let words = segmenter.segment_from_segments(&segments, Some(converter.get_root()));

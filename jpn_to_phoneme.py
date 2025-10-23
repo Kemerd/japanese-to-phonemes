@@ -295,56 +295,117 @@ class TextSegment:
     furigana_hint: str = ""
 
 
-def parse_furigana_hints(text: str) -> List[TextSegment]:
+def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[TextSegment]:
     """
-    Parse text into segments, extracting furigana hints.
+    Parse text into segments, extracting furigana hints with SMART ALGORITHMS.
     
-    Supported formats:
-    - 健太「けんた」 → base: "健太", hint: "けんた"
-    - 健太【けんた】 → base: "健太", hint: "けんた"
-    - 健太『けんた』 → base: "健太", hint: "けんた"
-    - 健太[けんた] → base: "健太", hint: "けんた"
+    🔥 SMART NAME DETECTION: Detects honorifics (さん, 先生, etc.) to prevent incorrect splitting
+    🔥 SMART HINT BACKTRACKING: Matches reading from the end of kanji backwards to split correctly
+    
+    Example: 山本「やまもと」さん → Full reading for entire name (name detection)
+    Example: 五百円「えん」 → Split as 五百 + 円「えん」 (hint backtracking)
     
     Returns list of TextSegment objects
     """
     segments = []
-    current_text = ""
     i = 0
     
     while i < len(text):
-        # Check for furigana brackets
-        if text[i] in '「【『[':
-            # Find the base text (everything accumulated so far)
-            base_text = current_text
-            current_text = ""
+        # Look for opening bracket 「 only (U+300C)
+        bracket_open = text.find('「', i)
+        
+        if bracket_open == -1:
+            # No more furigana hints, add rest of text as normal segment
+            if i < len(text):
+                segments.append(TextSegment(text=text[i:]))
+            break
+        
+        # Look for closing bracket 」 (U+300D)
+        bracket_close = text.find('」', bracket_open + 1)
+        
+        if bracket_close == -1:
+            # No closing bracket, add rest as normal segment
+            segments.append(TextSegment(text=text[i:]))
+            break
+        
+        # Find where the "word" (kanji) starts before the opening bracket
+        # Simple backward search for now (simplified from C++ version)
+        word_start = bracket_open
+        while word_start > i and text[word_start - 1] not in ' \t\n\r、。！？）］':
+            word_start -= 1
+        
+        # Add text from current position up to where the word/kanji starts
+        if word_start > i:
+            segments.append(TextSegment(text=text[i:word_start]))
+        
+        # Extract the kanji and reading
+        kanji = text[word_start:bracket_open]
+        reading = text[bracket_open + 1:bracket_close].strip()
+        
+        if not reading:
+            # Empty reading - skip the entire furigana hint
+            i = bracket_close + 1
+            continue
+        
+        # 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+        is_likely_name = False
+        after_bracket = bracket_close + 1
+        if after_bracket < len(text):
+            next_char = ord(text[after_bracket]) if after_bracket < len(text) else 0
+            # Check for common honorifics: さん、さま、様、君、ちゃん、くん、氏、殿、先生、師、長
+            if next_char == 0x3055:  # さ
+                if after_bracket + 1 < len(text):
+                    next_next = ord(text[after_bracket + 1])
+                    if next_next == 0x3093 or next_next == 0x307E:  # ん or ま
+                        is_likely_name = True
+            elif next_char in [0x69D8, 0x541B, 0x6C0F, 0x6BBF, 0x5148, 0x5E2B, 0x9577]:
+                is_likely_name = True
+            elif next_char in [0x3061, 0x304F]:  # ち or く
+                is_likely_name = True
+            elif next_char in [0x6559, 0x8B1B]:  # 教 or 講
+                is_likely_name = True
+        
+        # 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
+        final_kanji = kanji
+        final_word_start = word_start
+        
+        if phoneme_root and not is_likely_name and len(kanji) > 1:
+            MAX_BACKTRACK = min(10, len(kanji))
             
-            # Determine closing bracket
-            closing = {'「': '」', '【': '】', '『': '』', '[': ']'}[text[i]]
-            
-            # Find the closing bracket
-            hint_start = i + 1
-            hint_end = text.find(closing, hint_start)
-            
-            if hint_end != -1:
-                # Extract furigana hint
-                furigana_hint = text[hint_start:hint_end]
+            for try_length in range(1, MAX_BACKTRACK + 1):
+                try_start = len(kanji) - try_length
+                if try_start < 0:
+                    break
                 
-                # Add segment with hint
-                if base_text:
-                    segments.append(TextSegment(text=base_text, furigana_hint=furigana_hint))
+                kanji_substr = kanji[try_start:]
                 
-                i = hint_end + 1
-            else:
-                # No closing bracket found - treat as normal text
-                current_text += text[i]
-                i += 1
-        else:
-            current_text += text[i]
-            i += 1
-    
-    # Add any remaining text
-    if current_text:
-        segments.append(TextSegment(text=current_text))
+                # Try to match this kanji substring in the phoneme trie
+                current = phoneme_root
+                found_path = True
+                
+                for char in kanji_substr:
+                    char_code = ord(char)
+                    if char_code not in current.children:
+                        found_path = False
+                        break
+                    current = current.children[char_code]
+                
+                # Check if we found a valid entry
+                if found_path and current.phoneme is not None and current.phoneme != "":
+                    # Found a match! Check if we need to split
+                    if try_length < len(kanji):
+                        # Split: add prefix as normal text
+                        if try_start > 0:
+                            segments.append(TextSegment(text=kanji[:try_start]))
+                        final_kanji = kanji_substr
+                        final_word_start = word_start + try_start
+                        break
+                    # If try_length == len(kanji), use the whole thing
+                    break
+        
+        # Add the furigana segment
+        segments.append(TextSegment(text=final_kanji, furigana_hint=reading))
+        i = bracket_close + 1
     
     return segments
 
@@ -494,8 +555,8 @@ def convert_detailed_with_segmentation(converter: PhonemeConverter, text: str, s
     - Hint overrides dictionary lookup for that segment
     - Rest of text uses normal segmentation + conversion
     """
-    # Parse furigana hints first
-    segments = parse_furigana_hints(text)
+    # Parse furigana hints first with smart algorithms
+    segments = parse_furigana_hints(text, segmenter, converter.root)
     
     # Process each segment
     all_matches = []

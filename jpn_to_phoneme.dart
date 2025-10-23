@@ -630,7 +630,8 @@ bool _isKana(int codePoint) {
 /// 
 /// @param text Input text with potential furigana hints (e.g., 健太「けんた」)
 /// @param segmenter Optional word segmenter for compound word detection
-List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter}) {
+/// @param phonemeRoot Optional phoneme trie root for hint backtracking
+List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, TrieNode? phonemeRoot}) {
   final segments = <TextSegment>[];
   
   // Pre-decode to runes for blazing speed
@@ -765,8 +766,69 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter})
       continue;
     }
     
-    // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
+    // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+    bool isLikelyName = false;
     final afterBracket = bracketClose + 1;
+    if (afterBracket < runes.length) {
+      final nextChar = runes[afterBracket];
+      if (nextChar == 0x3055) { // さ
+        if (afterBracket + 1 < runes.length) {
+          final nextNext = runes[afterBracket + 1];
+          if (nextNext == 0x3093 || nextNext == 0x307E) { // ん or ま
+            isLikelyName = true;
+          }
+        }
+      } else if ([0x69D8, 0x541B, 0x6C0F, 0x6BBF, 0x5148, 0x5E2B, 0x9577, 0x3061, 0x304F, 0x6559, 0x8B1B].contains(nextChar)) {
+        isLikelyName = true;
+      }
+    }
+    
+    // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
+    var finalKanji = kanji;
+    var finalWordStart = wordStart;
+    
+    if (phonemeRoot != null && !isLikelyName && (bracketOpen - wordStart) > 1) {
+      final kanjiCharCount = bracketOpen - wordStart;
+      final maxBacktrack = kanjiCharCount < 10 ? kanjiCharCount : 10;
+      
+      for (var tryLength = 1; tryLength <= maxBacktrack; tryLength++) {
+        final tryStart = bracketOpen - tryLength;
+        if (tryStart < wordStart) break;
+        
+        final kanjiSubstr = String.fromCharCodes(runes.sublist(tryStart, bracketOpen));
+        
+        // Try to match this kanji substring in the phoneme trie
+        TrieNode? current = phonemeRoot;
+        bool foundPath = true;
+        
+        for (var i = tryStart; i < bracketOpen && current != null; i++) {
+          current = current.children[runes[i]];
+          if (current == null) {
+            foundPath = false;
+            break;
+          }
+        }
+        
+        // Check if we found a valid entry
+        if (foundPath && current != null && current.phoneme != null && current.phoneme!.isNotEmpty) {
+          // Found a match! Check if we need to split
+          if (tryLength < kanjiCharCount) {
+            // Split: add prefix as NORMAL_TEXT
+            if (tryStart > wordStart) {
+              final prefix = String.fromCharCodes(runes.sublist(wordStart, tryStart));
+              segments.add(TextSegment.normal(prefix, bytePositions[wordStart]));
+            }
+            finalKanji = kanjiSubstr;
+            finalWordStart = tryStart;
+            break;
+          }
+          // If tryLength == kanjiCharCount, use the whole thing
+          break;
+        }
+      }
+    }
+    
+    // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
     bool usedCompound = false;
     
     if (segmenter != null && afterBracket < runes.length) {
@@ -804,7 +866,7 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter})
     
     if (!usedCompound) {
       // No compound found, use the furigana hint
-      segments.add(TextSegment.furigana(kanji, reading, bytePositions[wordStart]));
+      segments.add(TextSegment.furigana(finalKanji, reading, bytePositions[finalWordStart]));
       pos = bracketClose + 1;
     }
   }
@@ -818,7 +880,7 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter})
 /// Example: 健太「けんた」はバカ → kẽ̞ɴta wa baka
 String convertWithSegmentation(PhonemeConverter converter, String text, WordSegmenter segmenter) {
   // 🔥 STEP 1: Parse furigana hints into structured segments
-  final segments = parseFuriganaSegments(text, segmenter: segmenter);
+  final segments = parseFuriganaSegments(text, segmenter: segmenter, phonemeRoot: converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   final words = segmenter.segmentFromSegments(segments, phonemeRoot: converter.getRoot());
@@ -840,7 +902,7 @@ String convertWithSegmentation(PhonemeConverter converter, String text, WordSegm
 /// OPTIMIZED: Uses furigana-aware segmentation and は → wa particle handling
 ConversionResult convertDetailedWithSegmentation(PhonemeConverter converter, String text, WordSegmenter segmenter) {
   // 🔥 STEP 1: Parse furigana hints into structured segments
-  final segments = parseFuriganaSegments(text, segmenter: segmenter);
+  final segments = parseFuriganaSegments(text, segmenter: segmenter, phonemeRoot: converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   final words = segmenter.segmentFromSegments(segments, phonemeRoot: converter.getRoot());

@@ -758,9 +758,10 @@ function isKana(codePoint: number): boolean {
  * 
  * @param text Input text with potential furigana hints (e.g., 健太「けんた」)
  * @param segmenter Optional word segmenter for compound word detection
+ * @param phonemeRoot Optional phoneme trie root for hint backtracking
  * @return Array of text segments with furigana hints properly parsed
  */
-function parseFuriganaSegments(text: string, segmenter?: WordSegmenter): TextSegment[] {
+function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeRoot?: TrieNode): TextSegment[] {
   const segments: TextSegment[] = [];
   
   // 🔥 PRE-DECODE UTF-16 TO CODE POINTS FOR BLAZING SPEED!
@@ -946,9 +947,80 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter): TextSeg
       continue;
     }
     
+    // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
+    let isLikelyName = false;
+    const afterBracket = bracketClose + 1;
+    if (afterBracket < codePoints.length) {
+      const nextChar = codePoints[afterBracket];
+      if (nextChar === 0x3055) { // さ
+        if (afterBracket + 1 < codePoints.length) {
+          const nextNext = codePoints[afterBracket + 1];
+          if (nextNext === 0x3093 || nextNext === 0x307E) { // ん or ま
+            isLikelyName = true;
+          }
+        }
+      } else if (nextChar === 0x69D8 || nextChar === 0x541B || 
+                 nextChar === 0x6C0F || nextChar === 0x6BBF ||
+                 nextChar === 0x5148 || nextChar === 0x5E2B ||
+                 nextChar === 0x9577 || nextChar === 0x3061 ||
+                 nextChar === 0x304F || nextChar === 0x6559 ||
+                 nextChar === 0x8B1B) {
+        isLikelyName = true;
+      }
+    }
+    
+    // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
+    let kanjiStartIdx = positions[wordStart];
+    let finalKanji = kanji;
+    
+    if (phonemeRoot && !isLikelyName) {
+      const kanjiCharCount = bracketOpen - wordStart;
+      const MAX_BACKTRACK = Math.min(10, kanjiCharCount);
+      
+      for (let tryLength = 1; tryLength <= MAX_BACKTRACK; tryLength++) {
+        const tryStart = bracketOpen - tryLength;
+        if (tryStart < wordStart) break;
+        
+        const tryStartIdx = positions[tryStart];
+        const tryEndIdx = positions[bracketOpen];
+        const kanjiSubstr = text.substring(tryStartIdx, tryEndIdx);
+        
+        let current: TrieNode | null = phonemeRoot;
+        let foundPath = true;
+        
+        for (let i = tryStart; i < bracketOpen && current !== null; i++) {
+          const child = current.children.get(codePoints[i]);
+          if (!child) {
+            foundPath = false;
+            break;
+          }
+          current = child;
+        }
+        
+        if (foundPath && current !== null && current.phoneme !== null) {
+          if (tryLength < kanjiCharCount) {
+            if (tryStart > wordStart) {
+              const prefixStartIdx = positions[wordStart];
+              const prefixEndIdx = positions[tryStart];
+              segments.push({
+                type: SegmentType.NORMAL_TEXT,
+                text: text.substring(prefixStartIdx, prefixEndIdx),
+                reading: '',
+                originalPos: prefixStartIdx
+              });
+            }
+            kanjiStartIdx = tryStartIdx;
+            finalKanji = kanjiSubstr;
+            wordStart = tryStart;
+            break;
+          }
+          break;
+        }
+      }
+    }
+    
     // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
     // Walk the trie starting from kanji to find the longest compound word
-    const afterBracket = bracketClose + 1; // Position after 」
     let usedCompound = false;
     
     if (segmenter && afterBracket < codePoints.length) {
@@ -998,7 +1070,7 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter): TextSeg
       // No compound found, use the furigana hint
       segments.push({
         type: SegmentType.FURIGANA_HINT,
-        text: kanji,
+        text: finalKanji,
         reading: reading,
         originalPos: kanjiStartIdx
       });
@@ -1023,7 +1095,7 @@ function convertWithSegmentation(converter: PhonemeConverter, text: string, segm
   // 🔥 STEP 1: Parse furigana hints into structured segments
   // 健太「けんた」はバカ → [TextSegment("健太", "けんた"), TextSegment("はバカ")]
   // 見「み」て → [TextSegment("見て")] (compound word detected)
-  const segments = parseFuriganaSegments(text, segmenter);
+  const segments = parseFuriganaSegments(text, segmenter, converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   // Furigana segments are treated as atomic units
@@ -1052,7 +1124,7 @@ function convertWithSegmentation(converter: PhonemeConverter, text: string, segm
  */
 function convertDetailedWithSegmentation(converter: PhonemeConverter, text: string, segmenter: WordSegmenter): ConversionResult {
   // 🔥 STEP 1: Parse furigana hints into structured segments
-  const segments = parseFuriganaSegments(text, segmenter);
+  const segments = parseFuriganaSegments(text, segmenter, converter.getRoot());
   
   // 🔥 STEP 2: Segment into words using structured segments with phoneme fallback
   const words = segmenter.segmentFromSegments(segments, converter.getRoot());
