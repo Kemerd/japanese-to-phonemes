@@ -1100,6 +1100,63 @@ public:
                     continue;
                 }
                 
+                // 🔥 SMART PARTICLE CHECK: Check if this is a particle that should be separated
+                // BUT ONLY if it doesn't form a longer word with following characters!
+                // This prevents は+もう → はもう, while allowing できる, とても to stay as words
+                uint32_t current_char = chars[pos];
+                bool is_potential_particle = (
+                    current_char == 0x306F ||  // は (topic marker)
+                    //current_char == 0x304C ||  // が (subject marker)
+                    current_char == 0x3092   // を (object marker)
+                    //current_char == 0x306B ||  // に (direction/time)
+                    //current_char == 0x3078 ||  // へ (direction)
+                    //current_char == 0x3067 ||  // で (location/means)
+                    //current_char == 0x3068 ||  // と (and/with)
+                    //current_char == 0x3082 ||  // も (also)
+                    //current_char == 0x306E ||  // の (possessive)
+                    //current_char == 0x3084 ||  // や (and/or)
+                    //current_char == 0x304B     // か (question)
+                );
+                
+                // If it's a potential particle, check if it can form a multi-character word
+                bool treat_as_particle = false;
+                if (is_potential_particle) {
+                    // Use longest-match algorithm to check if this particle forms a longer word
+                    // Walk the trie as far as possible to find ANY multi-char word starting here
+                    bool has_longer_match = false;
+                    
+                    if (phoneme_root != nullptr && pos + 1 < chars.size()) {
+                        TrieNode* check_node = phoneme_root;
+                        
+                        // Walk through as many characters as possible
+                        for (size_t i = pos; i < chars.size() && check_node != nullptr; i++) {
+                            auto it = check_node->children.find(chars[i]);
+                            if (it == check_node->children.end()) {
+                                break;
+                            }
+                            check_node = it->second.get();
+                            
+                            // Check if we found a multi-character word (not just single particle)
+                            if (i > pos && check_node->phoneme.has_value() && !check_node->phoneme.value().empty()) {
+                                has_longer_match = true;
+                                break;  // Found a longer word, stop checking
+                            }
+                        }
+                    }
+                    
+                    // Only treat as particle if it DOESN'T form a longer word
+                    treat_as_particle = !has_longer_match;
+                }
+                
+                // If it's a standalone particle, treat it as a single token
+                if (treat_as_particle) {
+                    size_t start_byte = byte_positions[pos];
+                    size_t end_byte = byte_positions[pos + 1];
+                    words.push_back(text.substr(start_byte, end_byte - start_byte));
+                    pos++;
+                    continue;  // Skip the rest of the matching logic
+                }
+                
                 // Try to find longest word match starting at current position
                 // Check word dictionary first, then phoneme dictionary as fallback
                 size_t match_length = 0;
@@ -1145,9 +1202,9 @@ public:
                     words.push_back(text.substr(start_byte, end_byte - start_byte));
                     pos += match_length;
                 } else {
-                    // No match found - this is likely a grammatical element
-                    // Collect all consecutive unmatched characters as a single token
-                    // This handles particles (は、が、を), conjugations (です、ます), etc.
+                    // No match found - collect all consecutive unmatched characters as grammar token
+                    // This handles compound particles (から、まで、etc.) and conjugations (です、ます)
+                    // Note: Single-char particles are already handled earlier, so this won't merge them
                     size_t grammar_start = pos;
                     size_t grammar_length = 0;
                     
