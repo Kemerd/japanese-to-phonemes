@@ -105,6 +105,172 @@ COMMON_KANJI = {
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# JAPANESE NUMBERS SYSTEM
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Basic numbers 1-10 and counters
+BASIC_NUMBERS = {
+    # Basic digits 1-10
+    '一': 'iʨi',
+    '二': 'ni',
+    '三': 'saɴ',
+    '四': 'ɕi',      # shi (also よん yon)
+    '五': 'go',
+    '六': 'ɾokɯ',
+    '七': 'ɕiʨi',    # shichi (also なな nana)
+    '八': 'haʨi',
+    '九': 'kɯ',      # ku (also きゅう kyuu)
+    '十': 'ʥɯː',
+    
+    # Alternative readings
+    'よん': 'joɴ',    # alternative for 四
+    'なな': 'nana',   # alternative for 七
+    'きゅう': 'kjɯː', # alternative for 九
+    
+    # Counters
+    '百': 'çakɯ',    # hyaku (hundred)
+    '千': 'seɴ',     # sen (thousand)
+    '万': 'maɴ',     # man (ten thousand)
+    '億': 'okɯ',     # oku (hundred million)
+    '兆': 'ʨoː',     # chou (trillion)
+    
+    # Zero
+    '零': 'ɾeː',     # rei
+    'ゼロ': 'zeɾo',  # zero
+}
+
+# Hundreds (100-900)
+HUNDREDS = {
+    '百': 'çakɯ',           # 100 - hyaku
+    '二百': 'niçakɯ',       # 200 - nihyaku
+    '三百': 'saɴbjakɯ',     # 300 - sanbyaku (rendaku)
+    '四百': 'joɴçakɯ',      # 400 - yonhyaku
+    '五百': 'goçakɯ',       # 500 - gohyaku
+    '六百': 'ɾopːjakɯ',     # 600 - roppyaku (rendaku + consonant lengthening)
+    '七百': 'nanaçakɯ',     # 700 - nanahyaku
+    '八百': 'hapːjakɯ',     # 800 - happyaku (consonant lengthening)
+    '九百': 'kjɯːçakɯ',     # 900 - kyuuhyaku
+}
+
+# Thousands (1000-9000)
+THOUSANDS = {
+    '千': 'seɴ',            # 1000 - sen
+    '二千': 'niseɴ',        # 2000 - nisen
+    '三千': 'saɴzeɴ',       # 3000 - sanzen (rendaku)
+    '四千': 'joɴseɴ',       # 4000 - yonsen
+    '五千': 'goseɴ',        # 5000 - gosen
+    '六千': 'ɾokɯseɴ',      # 6000 - rokusen
+    '七千': 'nanaseɴ',      # 7000 - nanasen
+    '八千': 'hasːeɴ',       # 8000 - hassen (consonant lengthening)
+    '九千': 'kjɯːseɴ',      # 9000 - kyuusen
+}
+
+# Ten thousands (10000-90000) - 万
+TEN_THOUSANDS = {
+    '万': 'maɴ',            # 10,000 - man
+    '一万': 'iʨimaɴ',       # 10,000 - ichiman
+    '二万': 'nimaɴ',        # 20,000 - niman
+    '三万': 'saɴmaɴ',       # 30,000 - sanman
+    '四万': 'joɴmaɴ',       # 40,000 - yonman
+    '五万': 'gomaɴ',        # 50,000 - goman
+    '六万': 'ɾokɯmaɴ',      # 60,000 - rokuman
+    '七万': 'nanamaɴ',      # 70,000 - nanaman
+    '八万': 'haʨimaɴ',      # 80,000 - hachiman
+    '九万': 'kjɯːmaɴ',      # 90,000 - kyuuman
+    '十万': 'ʥɯːmaɴ',       # 100,000 - juuman
+}
+
+# Hundred thousands (100000-900000)
+HUNDRED_THOUSANDS = {
+    '十万': 'ʥɯːmaɴ',       # 100,000
+    '二十万': 'niʥɯːmaɴ',   # 200,000
+    '三十万': 'saɴʥɯːmaɴ',  # 300,000
+    '四十万': 'joɴʥɯːmaɴ',  # 400,000
+    '五十万': 'goʥɯːmaɴ',   # 500,000
+    '六十万': 'ɾokɯʥɯːmaɴ', # 600,000
+    '七十万': 'nanaʥɯːmaɴ', # 700,000
+    '八十万': 'haʨiʥɯːmaɴ', # 800,000
+    '九十万': 'kjɯːʥɯːmaɴ', # 900,000
+}
+
+# Millions (100万) - one million in Japanese is 百万 (hyakuman)
+MILLIONS = {
+    '百万': 'çakɯmaɴ',          # 1,000,000 - hyakuman
+    '二百万': 'niçakɯmaɴ',      # 2,000,000
+    '三百万': 'saɴbjakɯmaɴ',    # 3,000,000
+    '四百万': 'joɴçakɯmaɴ',     # 4,000,000
+    '五百万': 'goçakɯmaɴ',      # 5,000,000
+    '六百万': 'ɾopːjakɯmaɴ',    # 6,000,000
+    '七百万': 'nanaçakɯmaɴ',    # 7,000,000
+    '八百万': 'hapːjakɯmaɴ',    # 8,000,000
+    '九百万': 'kjɯːçakɯmaɴ',    # 9,000,000
+    '千万': 'seɴmaɴ',           # 10,000,000 - senman
+}
+
+# Common compound numbers (11-99)
+COMPOUND_NUMBERS = {
+    # 11-19
+    '十一': 'ʥɯːiʨi',
+    '十二': 'ʥɯːni',
+    '十三': 'ʥɯːsaɴ',
+    '十四': 'ʥɯːɕi',
+    '十五': 'ʥɯːgo',
+    '十六': 'ʥɯːɾokɯ',
+    '十七': 'ʥɯːɕiʨi',
+    '十八': 'ʥɯːhaʨi',
+    '十九': 'ʥɯːkɯ',
+    
+    # Tens (20-90)
+    '二十': 'niʥɯː',
+    '三十': 'saɴʥɯː',
+    '四十': 'joɴʥɯː',
+    '五十': 'goʥɯː',
+    '六十': 'ɾokɯʥɯː',
+    '七十': 'nanaʥɯː',
+    '八十': 'haʨiʥɯː',
+    '九十': 'kjɯːʥɯː',
+}
+
+# Currency and common number+counter combinations
+NUMBER_COUNTERS = {
+    '円': 'eɴ',              # yen
+    # Note: Don't add specific yen amounts like 五百円 - let backtracking handle them!
+    # The furigana 五百円「えん」will be split into 五百 + 円「えん」automatically
+    
+    # Common amounts for people
+    '一人': 'çitoɾi',        # one person (hitori)
+    '二人': 'ɸɯtaɾi',        # two people (futari)
+    '三人': 'saɴniɴ',        # three people
+    '四人': 'joniɴ',         # four people
+    
+    # Time - these are OK because they don't have furigana issues
+    '一時': 'iʨiʥi',         # 1 o'clock
+    '二時': 'niʥi',
+    '三時': 'saɴʥi',
+    '四時': 'joʥi',
+    '五時': 'goʥi',
+    '六時': 'ɾokɯʥi',
+    '七時': 'ɕiʨiʥi',
+    '八時': 'haʨiʥi',
+    '九時': 'kɯʥi',
+    '十時': 'ʥɯːʥi',
+    '十一時': 'ʥɯːiʨiʥi',
+    '十二時': 'ʥɯːniʥi',
+}
+
+# All numbers combined
+ALL_NUMBERS = {
+    **BASIC_NUMBERS,
+    **HUNDREDS,
+    **THOUSANDS,
+    **TEN_THOUSANDS,
+    **HUNDRED_THOUSANDS,
+    **MILLIONS,
+    **COMPOUND_NUMBERS,
+    **NUMBER_COUNTERS,
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VERB CONJUGATION SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -867,16 +1033,43 @@ def main():
     original_count = len(data)
     print(f"   Original entries: {original_count}")
     
-    # Step 1: Add missing basic kana and common characters
-    print("\nStep 1: Adding missing basic hiragana, katakana, and common characters...")
+    # Step 1: Add/fix missing basic kana, numbers, and common characters
+    print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, and common characters...")
     added_count = 0
+    numbers_added = 0
+    numbers_fixed = 0
     
-    for char, phoneme in {**BASIC_HIRAGANA, **BASIC_KATAKANA, **COMMON_KANJI}.items():
+    # Combine all basic entries
+    all_basic_entries = {
+        **BASIC_HIRAGANA, 
+        **BASIC_KATAKANA, 
+        **COMMON_KANJI,
+    }
+    
+    # Add basic kana/kanji (only if missing)
+    for char, phoneme in all_basic_entries.items():
         if char not in data:
             data[char] = phoneme
             added_count += 1
     
+    # OVERRIDE numbers (fix incorrect existing entries)
+    # Many older dictionaries have wrong phonemes for numbers
+    for char, phoneme in ALL_NUMBERS.items():
+        if char not in data:
+            data[char] = phoneme
+            added_count += 1
+            numbers_added += 1
+        elif data[char] != phoneme:
+            # Fix incorrect existing entry
+            data[char] = phoneme
+            numbers_fixed += 1
+        else:
+            # Already correct
+            pass
+    
     print(f"   Added {added_count} missing entries")
+    print(f"   Fixed {numbers_fixed} incorrect number entries")
+    print(f"   Numbers processed: {numbers_added + numbers_fixed} total (added {numbers_added}, fixed {numbers_fixed})")
     
     # Step 1.5: Generate verb conjugations (PARALLELIZED)
     print("\nStep 1.5: Generating verb conjugations...")
@@ -952,7 +1145,7 @@ def main():
         for word, phoneme, vtype, count in sample_verbs:
             print(f"     • {word} ({phoneme}) [{vtype}] → {count} forms")
     
-    # Step 1.6: Update word list with conjugated forms
+    # Step 1.6: Update word list with conjugated forms AND numbers
     print(f"\nStep 1.6: Updating word list...")
     
     # Check if original_ja_words.txt exists
@@ -974,6 +1167,15 @@ def main():
         
         original_word_count = len(word_set)
         print(f" Done! ({original_word_count} words)")
+        
+        # Add all numbers as words (critical for segmentation!)
+        print(f"   Adding {len(ALL_NUMBERS)} number entries...", end='', flush=True)
+        number_words_added = 0
+        for number_word in ALL_NUMBERS.keys():
+            if number_word not in word_set:
+                word_set.add(number_word)
+                number_words_added += 1
+        print(f" Done! (+{number_words_added} new)")
         
         # Add conjugated verb forms
         print(f"   Adding {len(conjugated_words)} conjugated forms...", end='', flush=True)
