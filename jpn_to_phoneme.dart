@@ -710,7 +710,29 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter})
       
       // Check if this is kana
       if (_isKana(rune)) {
-        // Check if there's ANY kanji before this position
+        // 🔥 ENHANCED LOGIC: Check if the kana sequence from here to the kanji is a word
+        // Example: "とても面白「おもしろ」" → "とても" is a word, stop here
+        // This prevents incorrectly treating standalone words as okurigana
+        
+        // Extract kana sequence from searchPos to bracketOpen
+        var kanaSeqEnd = searchPos;
+        while (kanaSeqEnd < bracketOpen && _isKana(runes[kanaSeqEnd])) {
+          kanaSeqEnd++;
+        }
+        
+        // If we have a kana sequence, check if it's a word
+        if (kanaSeqEnd > searchPos && segmenter != null) {
+          final kanaSequence = String.fromCharCodes(runes.sublist(searchPos, kanaSeqEnd));
+          
+          // Check if this kana sequence is a word in the dictionary
+          if (segmenter.containsWord(kanaSequence)) {
+            // This kana sequence is a complete word → stop here
+            wordStart = searchPos + 1;
+            break;
+          }
+        }
+        
+        // Not a word itself - check if there's ANY kanji before this position
         final hasKanjiBefore = runes.sublist(pos, searchPos).any((r) {
           return r >= 0x4E00 || (r >= 0x3400 && r <= 0x9FFF);
         });

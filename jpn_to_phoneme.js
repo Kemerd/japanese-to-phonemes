@@ -817,7 +817,31 @@ function parseFuriganaSegments(text, segmenter = null) {
       const isKanaChar = isKana(cp);
       
       if (isKanaChar) {
-        // Check if there's ANY non-kana (kanji) before this position
+        // 🔥 ENHANCED LOGIC: Check if the kana sequence from here to the kanji is a word
+        // Example: "とても面白「おもしろ」" → "とても" is a word, stop here
+        // This prevents incorrectly treating standalone words as okurigana
+        
+        // Extract kana sequence from searchPos to bracketOpen
+        let kanaSeqEnd = searchPos;
+        while (kanaSeqEnd < bracketOpen && isKana(codePoints[kanaSeqEnd])) {
+          kanaSeqEnd++;
+        }
+        
+        // If we have a kana sequence, check if it's a word
+        if (kanaSeqEnd > searchPos && segmenter) {
+          const kanaStartIdx = positions[searchPos];
+          const kanaEndIdx = positions[kanaSeqEnd];
+          const kanaSequence = text.substring(kanaStartIdx, kanaEndIdx);
+          
+          // Check if this kana sequence is a word in the dictionary
+          if (segmenter.containsWord(kanaSequence)) {
+            // This kana sequence is a complete word → stop here
+            wordStart = searchPos + 1;
+            break;
+          }
+        }
+        
+        // Not a word itself - check if there's ANY non-kana (kanji) before this position
         let hasKanjiBefore = false;
         for (let checkPos = searchPos; checkPos > pos; checkPos--) {
           if (!isKana(codePoints[checkPos - 1])) {
