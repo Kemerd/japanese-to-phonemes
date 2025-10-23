@@ -470,6 +470,224 @@ STANDALONE_KANJI_FIXES = {
     "驚": "odoɾoki",   # surprise (not "kjoː")
 }
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# COMPOUND WORDS WITH SPECIAL READINGS (jukujikun & common compounds)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# These multi-kanji compounds have special readings that don't follow
+# the individual kanji readings. Must be fixed as complete units.
+
+COMPOUND_WORD_FIXES = {
+    # ============================================================
+    # TIME EXPRESSIONS (今日, 明日, etc.)
+    # ============================================================
+    "今日": "kjoː",         # kyou (not "koɴniʨi" or "imaçi")
+    "明日": "aɕita",        # ashita (not "mjoːniʨi")
+    "昨日": "kinoː",        # kinou (not "sakɯʥitsɯ")
+    "一昨日": "otoːi",      # ototoi (not "iʨisakɯʥitsɯ")
+    "明後日": "asatte",     # asatte (not "mjoːgoɴiʨi")
+    "今年": "kotoɕi",       # kotoshi (not "koɴneɴ")
+    "去年": "kjoneɴ",       # kyonen (not "saneɴ")
+    "来年": "ɾaineɴ",       # rainen (already likely correct)
+    "今朝": "kesa",         # kesa (not "koɴasa")
+    "今晩": "koɴbaɴ",       # konban (already likely correct)
+    "今夜": "koɴja",        # konya (not "koɴjoɾɯ")
+    "毎日": "mainiʨi",      # mainichi (already likely correct)
+    "毎朝": "maiasa",       # maiasa (already likely correct)
+    "毎晩": "maibaɴ",       # maiban (already likely correct)
+    "毎年": "maitoɕi",      # maitoshi (not "maiねɴ")
+    "毎週": "maiɕɯː",       # maishuu (already likely correct)
+    "毎月": "maitsɯki",     # maitsuki (not "maiɡatsɯ")
+    "先月": "seɴɡetsɯ",     # sengetsu (already likely correct)
+    "来月": "ɾaiɡetsɯ",     # raigetsu (already likely correct)
+    "今月": "koɴɡetsɯ",     # kongetsu (already likely correct)
+    "先週": "seɴɕɯː",       # senshuu (already likely correct)
+    "来週": "ɾaiɕɯː",       # raishuu (already likely correct)
+    "今週": "koɴɕɯː",       # konshuu (already likely correct)
+    
+    # ============================================================
+    # FAMILY & PEOPLE (父さん, 母さん, etc.)
+    # ============================================================
+    "お父さん": "otoːsaɴ",  # otousan (not "oʨiʨisaɴ")
+    "お母さん": "okaːsaɴ",  # okaasan (not "ohahasaɴ")
+    "父さん": "toːsaɴ",     # tousan (not "ʨiʨisaɴ")
+    "母さん": "kaːsaɴ",     # kaasan (not "hahasaɴ")
+    "兄さん": "niːsaɴ",     # niisan (not "aɴisaɴ")
+    "姉さん": "neːsaɴ",     # neesan (not "aɴesaɴ")
+    "叔父さん": "oʥisaɴ",   # ojisan (uncle)
+    "叔母さん": "obasaɴ",   # obasan (aunt)
+    "伯父": "oʥi",          # oji (uncle)
+    "伯母": "oba",          # oba (aunt)
+    "祖父": "soɸɯ",         # sofu (grandfather) - or "ʥiːʥi" (jiiji)
+    "祖母": "sobo",         # sobo (grandmother) - or "baːba" (baaba)
+    "大人": "otoɴa",        # otona (not "dainiɴ" or "tainiɴ")
+    "子供": "kodomo",       # kodomo (not "ɕikjoː")
+    "子ども": "kodomo",     # kodomo (hiragana version)
+    "友達": "tomodaʨi",     # tomodachi (not "jɯːtatsɯ")
+    "仲間": "nakama",       # nakama (already likely correct)
+    
+    # ============================================================
+    # COMMON JUKUJIKUN (特殊な熟字訓)
+    # ============================================================
+    "大人": "otoɴa",        # otona (adult)
+    "今日": "kjoː",         # kyou (today)
+    "明日": "aɕita",        # ashita (tomorrow)
+    "昨日": "kinoː",        # kinou (yesterday)
+    "紅葉": "momiʥi",       # momiji (autumn leaves, not "koːjoː")
+    "時雨": "ɕiɡɯɾe",       # shigure (autumn rain, not "ʥiɯ")
+    "梅雨": "tsɯjɯ",        # tsuyu (rainy season, not "baいɯ")
+    "七夕": "tanabata",     # tanabata (star festival, not "ɕiʨiseki")
+    "二十歳": "hatаʨi",     # hatachi (20 years old, not "niʥɯːsai")
+    "二十日": "hatsɯka",    # hatsuka (20th day, not "niʥɯːniʨi")
+    "一日": "tsɯitaʨi",     # tsuitachi (1st day, not "iʨiniʨi")
+    "二日": "ɸɯtsɯka",      # futsuka (2nd day, not "niɴiʨi")
+    "三日": "mikːa",        # mikka (3rd day, not "saɴniʨi")
+    "四日": "jokːa",        # yokka (4th day, not "ɕiniʨi")
+    "五日": "itsɯka",       # itsuka (5th day, not "ɡoniʨi")
+    "六日": "mɯika",        # muika (6th day, not "ɾokɯniʨi")
+    "七日": "nanoka",       # nanoka (7th day, not "ɕiʨiniʨi")
+    "八日": "joːka",        # youka (8th day, not "haʨiniʨi")
+    "九日": "kokonoka",     # kokonoka (9th day, not "kjɯːniʨi")
+    "十日": "toːka",        # touka (10th day, not "ʥɯːniʨi")
+    "十四日": "ʥɯːjokːa",   # juuyokka (14th day)
+    "二十日": "hatsɯka",    # hatsuka (20th day)
+    "一月": "iʨiɡatsɯ",     # ichigatsu (January, not "hitotsɯki")
+    "二月": "niɡatsɯ",      # nigatsu (February)
+    "三月": "saɴɡatsɯ",     # sangatsu (March)
+    "四月": "ɕiɡatsɯ",      # shigatsu (April)
+    "五月": "ɡoɡatsɯ",      # gogatsu (May)
+    "六月": "ɾokɯɡatsɯ",    # rokugatsu (June)
+    "七月": "ɕiʨiɡatsɯ",    # shichigatsu (July)
+    "八月": "haʨiɡatsɯ",    # hachigatsu (August)
+    "九月": "kɯɡatsɯ",      # kugatsu (September)
+    "十月": "ʥɯːɡatsɯ",     # juugatsu (October)
+    "十一月": "ʥɯːiʨiɡatsɯ", # juuichigatsu (November)
+    "十二月": "ʥɯːniɡatsɯ", # juunigatsu (December)
+    
+    # ============================================================
+    # PLACES & LOCATIONS
+    # ============================================================
+    "田舎": "inaka",        # inaka (countryside, not "deɴɕa")
+    "都会": "tokai",        # tokai (city, not "tokai") - actually already correct
+    "神社": "ʥiɴʥa",        # jinja (shrine, already likely correct)
+    "お寺": "oteɾa",        # otera (temple)
+    "図書館": "toɕokaɴ",    # toshokan (library, already likely correct)
+    "病院": "bjoːiɴ",       # byouin (hospital, already likely correct)
+    "学校": "ɡakːoː",       # gakkou (school, already likely correct)
+    "会社": "kaiɕa",        # kaisha (company, already likely correct)
+    "銀行": "ɡiɴkoː",       # ginkou (bank, already likely correct)
+    "郵便局": "jɯːbiɴkjokɯ", # yuubinkyoku (post office)
+    "交番": "koːbaɴ",       # kouban (police box, already likely correct)
+    
+    # ============================================================
+    # NATURE COMPOUNDS
+    # ============================================================
+    "景色": "keɕiki",       # keshiki (scenery, not "keiɕokɯ")
+    "夕焼け": "jɯːjake",    # yuuyake (sunset)
+    "朝焼け": "asajake",    # asayake (sunrise)
+    "夕暮れ": "jɯːɡɯɾe",    # yuugure (evening/dusk)
+    "星空": "hoɕizoɾa",     # hoshizora (starry sky)
+    "青空": "aozoɾa",       # aozora (blue sky)
+    "台風": "taiɸɯː",       # taifuu (typhoon, already likely correct)
+    "地震": "ʥiɕiɴ",        # jishin (earthquake, already likely correct)
+    "雷雨": "ɾaiɯ",         # raiu (thunderstorm)
+    
+    # ============================================================
+    # COMMON WORDS WITH SPECIAL READINGS
+    # ============================================================
+    "勉強": "beɴkjoː",      # benkyou (study, already likely correct)
+    "電話": "deɴɰa",        # denwa (telephone, already likely correct)
+    "手紙": "teɡami",       # tegami (letter, not "ɕɯɕi")
+    "眼鏡": "meɡaɴe",       # megane (glasses, not "ɡaɴkjoː")
+    "煙草": "tabako",       # tabako (tobacco/cigarette, not "eɴsoː")
+    "果物": "kɯdamono",     # kudamono (fruit, not "kаbɯtsɯ")
+    "野菜": "jasai",        # yasai (vegetables, already likely correct)
+    "お土産": "omijage",    # omiyage (souvenir, not "odoɕaɴ")
+    "土産": "mijage",       # miyage (souvenir)
+    "為替": "kaɰase",       # kawase (exchange, not "iɾeplaceɕi")
+    "相撲": "sɯmoː",        # sumou (sumo, not "soːbokɯ")
+    "浴衣": "jɯkata",       # yukata (summer kimono, not "jokɯi")
+    "着物": "kimono",       # kimono (not "ʨakɯbɯtsɯ")
+    "迷子": "maigo",        # maigo (lost child, not "meiɕi")
+    "玄関": "ɡeɴkaɴ",       # genkan (entrance, already likely correct)
+    "台所": "daidokoɾo",    # daidokoro (kitchen, not "taiɕo")
+    "居間": "ima",          # ima (living room, not "kjokaɴ")
+    "部屋": "heja",         # heya (room, not "bɯokɯ")
+    "風呂": "ɸɯɾo",         # furo (bath, not "ɸɯːɾo")
+    "下手": "heta",         # heta (unskillful, not "ɡeɕɯ" or "kaɕɯ")
+    "上手": "ʥoːzɯ",        # jouzu (skillful, not "ʥoːɕɯ" or "kamiて")
+    "下手": "ɕimote",       # shimote (lower seat) - alternate reading
+    "上手": "kamite",       # kamite (upper seat) - alternate reading
+    "大丈夫": "daiʥoːbɯ",   # daijoubu (okay/fine)
+    "丈夫": "ʥoːbɯ",        # joubu (sturdy/durable)
+    "神様": "kamisama",     # kamisama (god/deity)
+    "仏様": "hotokesama",   # hotokesama (Buddha)
+    "娘": "mɯsɯme",         # musume (daughter, not "ʥoː")
+    "息子": "mɯsɯko",       # musuko (son, not "sokɯɕi")
+    "兄弟": "kjoːdai",      # kyoudai (siblings, not "aɴiteい")
+    "姉妹": "ɕimai",        # shimai (sisters, not "ɕimai" - same!)
+    "夫婦": "ɸɯːɸɯ",        # fuufu (married couple, not "ɸɯɸɯ")
+    "一人": "çitoɾi",       # hitori (one person, not "iʨiniɴ")
+    "二人": "ɸɯtaɾi",       # futari (two people, not "niɴiɴ")
+    "三人": "saɴɴiɴ",       # sannin (three people)
+    "四人": "joniɴ",        # yonin (four people)
+    "五人": "ɡoniɴ",        # gonin (five people)
+    "一つ": "çitots",       # hitotsu (one thing)
+    "二つ": "ɸɯtats",       # futatsu (two things)
+    "三つ": "mitːs",        # mittsu (three things)
+    "四つ": "jotːs",        # yottsu (four things)
+    "五つ": "itsɯts",       # itsutsu (five things)
+    "六つ": "mɯtːs",        # muttsu (six things)
+    "七つ": "nanats",       # nanatsu (seven things)
+    "八つ": "jatːs",        # yattsu (eight things)
+    "九つ": "kokonots",     # kokonotsu (nine things)
+    "十": "toː",            # tou (ten)
+    
+    # ============================================================
+    # ACTIONS & STATES
+    # ============================================================
+    "行方": "jɯkɯe",        # yukue (whereabouts, not "ɡjoːhoː" or "aɴʥoː")
+    "出来る": "dekiɾɯ",     # dekiru (can do, not "ɕɯtsɯɾaiɾɯ")
+    "気持ち": "kimoʨi",     # kimochi (feeling, not "kimoʨi" - same!)
+    "気分": "kibɯɴ",        # kibun (mood, already likely correct)
+    "具合": "ɡɯai",         # guai (condition, not "ɡɯɡoː")
+    "都合": "tsɯɡoː",       # tsugou (convenience, not "toɡoː")
+    "場合": "baai",         # baai (case/situation, not "bаɡoː")
+    "道具": "doːɡɯ",        # dougu (tool, already likely correct)
+    "家具": "kaɡɯ",         # kagu (furniture, already likely correct)
+    "荷物": "nimots",       # nimotsu (luggage, already likely correct)
+    "着替え": "kiɡae",      # kigae (change of clothes)
+    "待合": "matɕiai",      # machiai (waiting room)
+    "見本": "mihoɴ",        # mihon (sample, not "keɴhoɴ")
+    "見舞い": "mimai",      # mimai (visit [sick person], not "keɴbɯ")
+    "聞き手": "kikite",     # kikite (listener, not "bɯɴɕɯ")
+    "話し手": "hanaɕite",   # hanashite (speaker)
+    
+    # ============================================================
+    # BODY & HEALTH
+    # ============================================================
+    "風邪": "kaze",         # kaze (cold/illness, not "ɸɯːʥa")
+    "怪我": "keɡa",         # kega (injury, not "kaiɡa")
+    "痛み": "itami",        # itami (pain, not "tsɯːmi")
+    "熱": "netsɯ",          # netsu (fever, not "atsɯ")
+    "頭痛": "zɯtsɯː",       # zutsuu (headache, not "toːtsɯː")
+    "腹痛": "ɸɯkɯtsɯː",     # fukutsuu (stomachache)
+    "元気": "ɡeɴki",        # genki (healthy/energetic, already likely correct)
+    
+    # ============================================================
+    # NUMBERS WITH COUNTERS (special readings)
+    # ============================================================
+    "一回": "ikːai",        # ikkai (one time, not "iʨikai")
+    "二回": "nikai",        # nikai (two times)
+    "三回": "saɴkai",       # sankai (three times)
+    "何回": "naɴkai",       # nankai (how many times)
+    "一番": "iʨibaɴ",       # ichiban (number one/most)
+    "二番": "nibaɴ",        # niban (number two)
+    "三番": "saɴbaɴ",       # sanban (number three)
+    "一度": "iʨido",        # ichido (one time/once)
+    "二度": "nido",         # nido (two times/twice)
+    "三度": "saɴdo",        # sando (three times)
+}
+
 # Common verbs in hiragana (often missing from dictionaries since they have Kanji equivalents)
 # These will automatically get conjugated by the verb system
 COMMON_VERBS_HIRAGANA = {
@@ -1603,6 +1821,21 @@ def main():
             kanji_fixes += 1
     print(f"   Fixed/added {kanji_fixes} standalone kanji readings (水→mizu, 山→yama, etc.)")
     
+    # Step 0.9: Fix compound words with special readings (jukujikun)
+    print("\nStep 0.9: Fixing compound words with special readings (今日→kyou, 明日→ashita, etc.)...")
+    compound_fixes = 0
+    for compound, correct_phoneme in COMPOUND_WORD_FIXES.items():
+        if compound in data:
+            old_phoneme = data[compound]
+            if old_phoneme != correct_phoneme:
+                data[compound] = correct_phoneme
+                compound_fixes += 1
+        else:
+            # Add if missing
+            data[compound] = correct_phoneme
+            compound_fixes += 1
+    print(f"   Fixed/added {compound_fixes} compound word readings (今日→kyou, 大人→otona, etc.)")
+    
     # Step 1: Add/fix missing basic kana, numbers, common characters, and verbs
     print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, common verbs, and characters...")
     added_count = 0
@@ -1845,6 +2078,7 @@ def main():
     print(f"   - Original entries: {original_count}")
     print(f"   - Particle ha->wa fixes: {particle_fixes}")
     print(f"   - Standalone kanji fixes: {kanji_fixes} (kun-yomi corrections)")
+    print(f"   - Compound word fixes: {compound_fixes} (jukujikun like 今日→kyou)")
     print(f"   - Added missing kana/kanji: {added_count}")
     print(f"   - Verbs found: {verb_count}")
     print(f"   - Verb conjugations generated: {conjugation_count}")
