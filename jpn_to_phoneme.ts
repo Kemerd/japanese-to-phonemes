@@ -980,11 +980,6 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
       });
     }
     
-    // Extract the kanji and reading using pre-decoded positions
-    const kanjiStartIdx = positions[wordStart];
-    const kanjiEndIdx = positions[bracketOpen];
-    const kanji = text.substring(kanjiStartIdx, kanjiEndIdx);
-    
     // Extract reading between brackets
     const readingStart = bracketOpen + 1; // Position after 「
     const readingEnd = bracketClose;      // Position before 」
@@ -1000,9 +995,62 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
       continue;
     }
     
+    // 🔥 SMART COMPOUND-AWARE KANJI BOUNDARY DETECTION
+    let bestKanjiStart = wordStart;
+    let bestCompoundLength = 0;
+    const afterBracket = bracketClose + 1;
+    
+    if ((segmenter || phonemeRoot) && afterBracket < codePoints.length) {
+      for (let tryStart = wordStart; tryStart < bracketOpen; tryStart++) {
+        let current = phonemeRoot || (segmenter ? segmenter.getRoot() : null);
+        if (!current) continue;
+        
+        let validPath = true;
+        for (let i = tryStart; i < bracketOpen && current !== null; i++) {
+          current = current.children.get(codePoints[i]) || null;
+          if (current === null) {
+            validPath = false;
+            break;
+          }
+        }
+        
+        let compoundLength = 0;
+        if (validPath && current !== null) {
+          for (let i = afterBracket; i < codePoints.length && current !== null; i++) {
+            current = current.children.get(codePoints[i]) || null;
+            if (current === null) break;
+            if (current.phoneme !== null) {
+              compoundLength = i - afterBracket + 1;
+            }
+          }
+        }
+        
+        if (compoundLength > bestCompoundLength) {
+          bestCompoundLength = compoundLength;
+          bestKanjiStart = tryStart;
+        }
+      }
+      
+      if (bestCompoundLength > 0 && bestKanjiStart > wordStart) {
+        const prefixStartIdx = positions[wordStart];
+        const prefixEndIdx = positions[bestKanjiStart];
+        segments.push({
+          type: SegmentType.NORMAL_TEXT,
+          text: text.substring(prefixStartIdx, prefixEndIdx),
+          reading: '',
+          originalPos: prefixStartIdx
+        });
+        wordStart = bestKanjiStart;
+      }
+    }
+    
+    const kanjiStartIdx = positions[wordStart];
+    const kanjiEndIdx = positions[bracketOpen];
+    const kanji = text.substring(kanjiStartIdx, kanjiEndIdx);
+    
     // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
     let isLikelyName = false;
-    const afterBracket = bracketClose + 1;
+    // afterBracket already declared above
     if (afterBracket < codePoints.length) {
       const nextChar = codePoints[afterBracket];
       if (nextChar === 0x3055) { // さ
@@ -1054,24 +1102,21 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
           const phonemeValue = current.phoneme;
           
           // 🔥 FIX: We must verify the phoneme MATCHES our reading!
-          // Convert the reading (hiragana/katakana) to phonemes and compare
-          let readingNode: TrieNode | null = phonemeRoot;
-          let readingFound = true;
+          // Reading is hiragana/katakana, so look up EACH CHARACTER individually
+          const readingCodePoints = Array.from(reading).map(c => c.codePointAt(0)!);
+          let readingPhoneme = '';
+          let allCharsFound = true;
           
-          for (let r = readingStart; r < readingEnd && readingNode !== null; r++) {
-            const rChild = readingNode.children.get(codePoints[r]);
-            if (!rChild) {
-              readingFound = false;
+          for (const readingCp of readingCodePoints) {
+            const charNode = phonemeRoot.children.get(readingCp);
+            if (!charNode || charNode.phoneme === null || charNode.phoneme === '') {
+              allCharsFound = false;
               break;
             }
-            readingNode = rChild;
+            readingPhoneme += charNode.phoneme;
           }
           
-          // Only split if the phoneme for the substring matches the reading's phoneme
-          const phonemesMatch = readingFound && 
-                                readingNode !== null && 
-                                readingNode.phoneme !== null &&
-                                phonemeValue === readingNode.phoneme;
+          const phonemesMatch = allCharsFound && phonemeValue === readingPhoneme;
           
           if (tryLength < kanjiCharCount && phonemesMatch) {
             if (tryStart > wordStart) {
@@ -1096,51 +1141,20 @@ function parseFuriganaSegments(text: string, segmenter?: WordSegmenter, phonemeR
       }
     }
     
-    // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
-    // Walk the trie starting from kanji to find the longest compound word
+    // 🔥 USE COMPOUND DETECTION RESULT
     let usedCompound = false;
     
-    if (segmenter && afterBracket < codePoints.length) {
-      // Use trie to find longest match starting from word_start position
-      // This naturally implements longest-match algorithm
-      let matchLength = 0;
-      let current: TrieNode | null = segmenter.getRoot();
-      
-      // Walk trie through kanji characters first
-      for (let i = wordStart; i < bracketOpen && current !== null; i++) {
-        current = current.children.get(codePoints[i]) || null;
-        if (current === null) break;
-      }
-      
-      // Continue walking through characters after the bracket
-      if (current !== null) {
-        for (let i = afterBracket; i < codePoints.length && current !== null; i++) {
-          current = current.children.get(codePoints[i]) || null;
-          if (current === null) break;
-          
-          // Check if this position marks a valid word ending
-          if (current.phoneme !== null) {
-            // Found a compound! Track it as the longest so far
-            matchLength = i - afterBracket + 1;
-          }
-        }
-      }
-      
-      // If we found a compound word, use it with the furigana reading replacing the kanji
-      // This ensures that 来「き」た becomes "きた" not "来た" for phoneme conversion
-      if (matchLength > 0) {
-        const compoundEndIdx = positions[afterBracket + matchLength];
-        // 🔥 KEY FIX: Use the furigana READING instead of kanji!
-        const compound = reading + text.substring(positions[afterBracket], compoundEndIdx);
-        segments.push({
-          type: SegmentType.NORMAL_TEXT,
-          text: compound,
-          reading: '',
-          originalPos: kanjiStartIdx
-        });
-        pos = afterBracket + matchLength;
-        usedCompound = true;
-      }
+    if (bestCompoundLength > 0) {
+      const compoundEndIdx = positions[afterBracket + bestCompoundLength];
+      const compound = reading + text.substring(positions[afterBracket], compoundEndIdx);
+      segments.push({
+        type: SegmentType.NORMAL_TEXT,
+        text: compound,
+        reading: '',
+        originalPos: kanjiStartIdx
+      });
+      pos = afterBracket + bestCompoundLength;
+      usedCompound = true;
     }
     
     if (!usedCompound) {

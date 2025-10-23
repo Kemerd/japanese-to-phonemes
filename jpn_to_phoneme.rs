@@ -951,8 +951,7 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
             segments.push(TextSegment::new_normal(text_str, byte_positions[pos]));
         }
         
-        // Extract the kanji and reading
-        let kanji: String = chars[word_start..bracket_open].iter().collect();
+        // Extract the reading
         let reading: String = chars[bracket_open + 1..bracket_close].iter().collect();
         let reading = reading.trim().to_string();
         
@@ -962,11 +961,64 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
             continue;
         }
         
+        // 🔥 SMART COMPOUND-AWARE KANJI BOUNDARY DETECTION
+        let mut best_kanji_start = word_start;
+        let mut best_compound_length = 0;
+        let after_bracket = bracket_close + 1;
+        
+        if (segmenter.is_some() || phoneme_root.is_some()) && after_bracket < chars.len() {
+            for try_start in word_start..bracket_open {
+                let mut current = if let Some(pr) = phoneme_root { Some(pr) } else { segmenter.map(|s| s.get_root()) };
+                if current.is_none() { continue; }
+                
+                let mut valid_path = true;
+                for i in try_start..bracket_open {
+                    if let Some(node) = current {
+                        current = node.children.get(&chars[i]);
+                        if current.is_none() {
+                            valid_path = false;
+                            break;
+                        }
+                    }
+                }
+                
+                let mut compound_length = 0;
+                if valid_path && current.is_some() {
+                    for i in after_bracket..chars.len() {
+                        if let Some(node) = current {
+                            current = node.children.get(&chars[i]);
+                            if current.is_none() { break; }
+                            if let Some(n) = current {
+                                if n.phoneme.is_some() {
+                                    compound_length = i - after_bracket + 1;
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                
+                if compound_length > best_compound_length {
+                    best_compound_length = compound_length;
+                    best_kanji_start = try_start;
+                }
+            }
+            
+            if best_compound_length > 0 && best_kanji_start > word_start {
+                let prefix: String = chars[word_start..best_kanji_start].iter().collect();
+                segments.push(TextSegment::new_normal(prefix, byte_positions[word_start]));
+                word_start = best_kanji_start;
+            }
+        }
+        
+        let kanji: String = chars[word_start..bracket_open].iter().collect();
+        
         // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
         // If we see さん、さま、様、君、ちゃん、くん etc. after the hint,
         // the reading applies to the ENTIRE name, so skip backtracking!
         let mut is_likely_name = false;
-        let after_bracket = bracket_close + 1;
+        // after_bracket already declared above
         if after_bracket < chars.len() {
             let next_char = chars[after_bracket] as u32;
             // Check for common honorifics
@@ -1018,34 +1070,31 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
                         if let Some(node) = current {
                             if let Some(ref phoneme_value) = node.phoneme {
                                 // 🔥 FIX: We must verify the phoneme MATCHES our reading!
-                                // Convert the reading (hiragana/katakana) to phonemes and compare
-                                let mut reading_node = Some(phoneme_trie);
-                                let mut reading_found = true;
+                                // Reading is hiragana/katakana, so look up EACH CHARACTER individually
+                                let reading_chars: Vec<char> = reading.chars().collect();
+                                let mut reading_phoneme = String::new();
+                                let mut all_chars_found = true;
                                 
-                                for i in reading_start..reading_end {
-                                    if let Some(rnode) = reading_node {
-                                        reading_node = rnode.children.get(&chars[i]);
-                                        if reading_node.is_none() {
-                                            reading_found = false;
+                                for &ch in &reading_chars {
+                                    if let Some(char_node) = phoneme_trie.children.get(&ch) {
+                                        if let Some(ref ph) = char_node.phoneme {
+                                            if !ph.is_empty() {
+                                                reading_phoneme.push_str(ph);
+                                            } else {
+                                                all_chars_found = false;
+                                                break;
+                                            }
+                                        } else {
+                                            all_chars_found = false;
                                             break;
                                         }
+                                    } else {
+                                        all_chars_found = false;
+                                        break;
                                     }
                                 }
                                 
-                                // Only split if the phoneme for the substring matches the reading's phoneme
-                                let phonemes_match = if reading_found {
-                                    if let Some(rnode) = reading_node {
-                                        if let Some(ref reading_phoneme) = rnode.phoneme {
-                                            phoneme_value == reading_phoneme
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                };
+                                let phonemes_match = all_chars_found && phoneme_value == &reading_phoneme;
                                 
                                 // Found a match! Check if we need to split
                                 if try_length < kanji_char_count && phonemes_match {
@@ -1069,48 +1118,15 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
             }
         }
         
-        // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
+        // 🔥 USE COMPOUND DETECTION RESULT
         let mut used_compound = false;
         
-        if let Some(seg) = segmenter {
-            if after_bracket < chars.len() {
-                // Use trie to find longest match starting from word_start position
-                let mut match_length = 0;
-                let mut current = seg.get_root();
-                
-                // Walk trie through kanji characters first
-                for i in word_start..bracket_open {
-                    if let Some(child) = current.children.get(&chars[i]) {
-                        current = child;
-                    } else {
-                        break;
-                    }
-                }
-                
-                // Continue walking through characters after the bracket
-                for i in after_bracket..chars.len() {
-                    if let Some(child) = current.children.get(&chars[i]) {
-                        current = child;
-                        
-                        // Check if this position marks a valid word ending
-                        if current.phoneme.is_some() {
-                            // Found a compound! Track it as the longest so far
-                            match_length = i - after_bracket + 1;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                
-                // If we found a compound word, use it with the furigana reading
-                if match_length > 0 {
-                    let suffix: String = chars[after_bracket..after_bracket + match_length].iter().collect();
-                    let compound = format!("{}{}", reading, suffix);
-                    segments.push(TextSegment::new_normal(compound, byte_positions[word_start]));
-                    pos = after_bracket + match_length;
-                    used_compound = true;
-                }
-            }
+        if best_compound_length > 0 {
+            let suffix: String = chars[after_bracket..after_bracket + best_compound_length].iter().collect();
+            let compound = format!("{}{}", reading, suffix);
+            segments.push(TextSegment::new_normal(compound, byte_positions[word_start]));
+            pos = after_bracket + best_compound_length;
+            used_compound = true;
         }
         
         if !used_compound {

@@ -106,6 +106,370 @@ COMMON_KANJI = {
     '咲': 'saki',  # bloom/blossom
 }
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STANDALONE KANJI READING FIXES (kun-yomi for standalone kanji)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# When kanji appear by themselves, they typically use kun-yomi (native Japanese)
+# rather than on-yomi (Chinese-derived readings). This fixes common mistakes.
+
+STANDALONE_KANJI_FIXES = {
+    # ============================================================
+    # NATURE & ELEMENTS (水火山川 etc.)
+    # ============================================================
+    "水": "mizɯ",      # water (not "sɯi")
+    "火": "hi",        # fire (not "ka")
+    "山": "jama",      # mountain (not "saɴ")
+    "川": "kaɰa",      # river (not "seɴ")
+    "森": "moɾi",      # forest (not "ɕiɴ")
+    "林": "hajaɕi",    # woods (not "ɾiɴ")
+    "石": "iɕi",       # stone (not "seki")
+    "岩": "iɰa",       # rock/boulder (not "gaɴ")
+    "崖": "gake",      # cliff (not "gai")
+    "谷": "tani",      # valley (not "koku")
+    "峠": "toːge",     # mountain pass
+    "峰": "mine",      # peak (not "hoː")
+    "坂": "saka",      # slope/hill (not "haɴ")
+    "丘": "oka",       # hill (not "kjɯː")
+    "野": "no",        # field/plain (not "ja")
+    "原": "haɾa",      # field/plain (not "geɴ")
+    "砂": "sɯna",      # sand (not "sa")
+    "泥": "doɾo",      # mud (not "dei")
+    "塵": "tɕiɾi",     # dust (not "ʥiɴ")
+    "土": "tsɯʨi",     # soil/earth
+    "地": "ʨi",        # ground (not "ʥi")
+    
+    # ============================================================
+    # SKY, WEATHER & COSMOS (空雨雲etc.)
+    # ============================================================
+    "空": "soɾa",      # sky (not "kɯː")
+    "雨": "ame",       # rain (not "ɯ")
+    "雪": "jɯki",      # snow (not "setsɯ")
+    "雲": "kɯmo",      # cloud (not "ɯɴ")
+    "風": "kaze",      # wind (not "ɸɯː")
+    "霧": "kiɾi",      # fog/mist (not "mɯ")
+    "霜": "ɕimo",      # frost (not "soː")
+    "露": "tsɯjɯ",     # dew (not "ɾo")
+    "雷": "kaminaɾi",  # thunder (not "ɾai")
+    "虹": "niʥi",      # rainbow (not "koː")
+    "星": "hoɕi",      # star (not "sei")
+    "月": "tsɯki",     # moon/month (not "gatsɯ")
+    "日": "hi",        # day/sun (not "ka" or "niʨi")
+    "光": "çikaɾi",    # light (not "koː")
+    "影": "kage",      # shadow (not "eː")
+    "闇": "jami",      # darkness (not "aɴ")
+    
+    # ============================================================
+    # WATER & SEA (海波島etc.)
+    # ============================================================
+    "海": "ɯmi",       # sea (not "kai")
+    "波": "nami",      # wave (not "ha")
+    "潮": "ɕio",       # tide (not "ʨoː")
+    "浜": "hama",      # beach (not "hiɴ")
+    "岸": "kiɕi",      # shore/bank (not "gaɴ")
+    "島": "ɕima",      # island (not "toː")
+    "湖": "mizɯɯmi",   # lake (not "ko")
+    "池": "ike",       # pond (not "ʨi")
+    "沼": "nɯma",      # swamp (not "ɕoː")
+    "泉": "izɯmi",     # spring/fountain (not "seɴ")
+    "滝": "taki",      # waterfall (not "ɾoː")
+    "流": "nagaɾe",    # flow/current (not "ɾjɯː")
+    
+    # ============================================================
+    # TIME & SEASONS (年春夏秋冬etc.)
+    # ============================================================
+    "年": "toɕi",      # year (not "neɴ")
+    "春": "haɾɯ",      # spring (not "ɕɯɴ")
+    "夏": "natsɯ",     # summer (not "ka")
+    "秋": "aki",       # autumn (not "ɕɯː")
+    "冬": "ɸɯjɯ",      # winter (not "toː")
+    "朝": "asa",       # morning (not "ʨoː")
+    "昼": "çiɾɯ",      # noon/daytime (not "ʨɯː")
+    "夜": "joɾɯ",      # night (not "ja")
+    "夕": "jɯː",       # evening (not "seki")
+    "宵": "joi",       # evening/night
+    "今": "ima",       # now
+    "昔": "mɯkaɕi",    # long ago (not "seki")
+    "昨": "sakɯ",      # previous/last (not "sakɯ")
+    
+    # ============================================================
+    # PEOPLE & RELATIONSHIPS (人男女子etc.)
+    # ============================================================
+    "人": "hito",      # person (not "ʥiɴ")
+    "男": "otoko",     # man (not "daɴ")
+    "女": "oɴna",      # woman (not "ʥo")
+    "子": "ko",        # child (not "ɕi")
+    "親": "oja",       # parent (not "ɕiɴ")
+    "父": "ʨiʨi",      # father (not "ɸɯ")
+    "母": "haha",      # mother (not "bo")
+    "兄": "aɴi",       # older brother (not "kjoː")
+    "弟": "otoːto",    # younger brother (not "tei")
+    "姉": "aɴe",       # older sister (not "ɕi")
+    "妹": "imoːto",    # younger sister (not "mai")
+    "夫": "otto",      # husband (not "ɸɯ")
+    "妻": "tsɯma",     # wife (not "sai")
+    "嫁": "jome",      # bride/daughter-in-law (not "ka")
+    "婿": "mɯko",      # groom/son-in-law (not "sei")
+    "孫": "mago",      # grandchild (not "soɴ")
+    "祖": "oʥi",       # ancestor (not "so")
+    "友": "tomo",      # friend (not "jɯː")
+    "仲": "naka",      # relationship/friendship (not "ʨɯː")
+    "客": "kakɯ",      # guest (not "kjakɯ")
+    "主": "nɯɕi",      # master/owner (not "ɕɯ")
+    "王": "oː",        # king (already correct)
+    "姫": "çime",      # princess (not "ki")
+    "君": "kimi",      # you/lord (not "kɯɴ")
+    
+    # ============================================================
+    # BODY PARTS (手足目耳etc.)
+    # ============================================================
+    "手": "te",        # hand (not "ɕɯ")
+    "足": "aɕi",       # foot/leg (not "sokɯ")
+    "指": "jɯbi",      # finger (not "ɕi")
+    "爪": "tsɯme",     # nail/claw (not "soː")
+    "腕": "ɯde",       # arm (not "ɰaɴ")
+    "肩": "kata",      # shoulder (not "keɴ")
+    "背": "se",        # back (not "hai")
+    "腰": "koɕi",      # waist/lower back (not "joː")
+    "腹": "haɾa",      # belly/stomach (not "ɸɯkɯ")
+    "胸": "mɯne",      # chest/breast (not "kjoː")
+    "目": "me",        # eye (not "mokɯ")
+    "耳": "mimi",      # ear (not "ʥi")
+    "鼻": "hana",      # nose (not "bi")
+    "口": "kɯʨi",      # mouth (not "koː")
+    "舌": "ɕita",      # tongue (not "zetsɯ")
+    "歯": "ha",        # tooth (not "ɕi")
+    "顔": "kao",       # face (not "gaɴ")
+    "頭": "atama",     # head (not "toː")
+    "首": "kɯbi",      # neck (not "ɕɯ")
+    "髪": "kami",      # hair (not "hatsɯ")
+    "毛": "ke",        # hair/fur (not "moː")
+    "肌": "hada",      # skin (not "ki")
+    "骨": "hoɴe",      # bone (not "kotsɯ")
+    "肉": "nikɯ",      # meat/flesh (already correct)
+    "血": "ʨi",        # blood (not "ketsɯ")
+    "汗": "ase",       # sweat (not "kaɴ")
+    "涙": "namida",    # tears (not "ɾɯi")
+    "心": "kokoɾo",    # heart/mind (not "ɕiɴ")
+    "体": "kaɾada",    # body (not "tai")
+    "身": "mi",        # body/oneself (not "ɕiɴ")
+    "命": "inoʨi",     # life (not "meː")
+    
+    # ============================================================
+    # ANIMALS (犬猫馬鳥etc.)
+    # ============================================================
+    "犬": "inɯ",       # dog (not "keɴ")
+    "猫": "neko",      # cat (not "bjoː")
+    "馬": "ɯma",       # horse (not "ba")
+    "牛": "ɯɕi",       # cow (not "gjɯː")
+    "豚": "bɯta",      # pig (not "toɴ")
+    "羊": "çitsɯʥi",   # sheep (not "joː")
+    "鶏": "niɰatoɾi",  # chicken (not "kei")
+    "鳥": "toɾi",      # bird (not "ʨoː")
+    "鴨": "kamo",      # duck (not "oː")
+    "鶴": "tsɯɾɯ",     # crane (not "kakɯ")
+    "雀": "sɯzɯme",    # sparrow (not "ʥakɯ")
+    "鷹": "taka",      # hawk (not "joː")
+    "鷲": "ɰaɕi",      # eagle (not "ɕɯː")
+    "鳩": "hato",      # pigeon/dove (not "kjɯː")
+    "烏": "kaɾasɯ",    # crow (not "ɯ")
+    "魚": "sakana",    # fish (not "gjo")
+    "鯉": "koi",       # carp (not "ɾi")
+    "鮭": "sake",      # salmon (not "kei")
+    "蝦": "ebi",       # shrimp (not "ka")
+    "蟹": "kani",      # crab (not "kai")
+    "貝": "kai",       # shellfish (already correct)
+    "蛇": "hebi",      # snake (not "ʥa")
+    "蛙": "kaeɾɯ",     # frog (not "ɰa")
+    "亀": "kame",      # turtle (not "ki")
+    "虫": "mɯɕi",      # insect (not "ʨɯː")
+    "蝶": "ʨoː",       # butterfly
+    "蜂": "haʨi",      # bee/wasp (not "hoː")
+    "蝉": "semi",      # cicada (not "seɴ")
+    "蚊": "ka",        # mosquito (already correct)
+    "蟻": "aɾi",       # ant (not "gi")
+    "蜘蛛": "kɯmo",    # spider (not "ʨisɯ")
+    
+    # ============================================================
+    # PLANTS & FOOD (花木草米etc.)
+    # ============================================================
+    "花": "hana",      # flower (not "ka")
+    "草": "kɯsa",      # grass (not "soː")
+    "葉": "ha",        # leaf (not "joː")
+    "枝": "eda",       # branch (not "ɕi")
+    "根": "ne",        # root (not "koɴ")
+    "幹": "miki",      # trunk (not "kaɴ")
+    "種": "taɴe",      # seed (not "ɕɯ")
+    "実": "mi",        # fruit/nut (not "ʥitsɯ")
+    "竹": "take",      # bamboo (not "ʨikɯ")
+    "松": "matsɯ",     # pine (not "ɕoː")
+    "杉": "sɯgi",      # cedar (not "saɴ")
+    "桜": "sakɯɾa",    # cherry blossom (not "oː")
+    "梅": "ɯme",       # plum (not "bai")
+    "柳": "janaɡi",    # willow (not "ɾjɯː")
+    "藤": "ɸɯʥi",      # wisteria (not "toː")
+    "蓮": "hasɯ",      # lotus (not "ɾeɴ")
+    "菊": "kikɯ",      # chrysanthemum (already correct)
+    "米": "kome",      # rice (not "mai")
+    "麦": "mɯɡi",      # wheat (not "bakɯ")
+    "豆": "mame",      # bean (not "toː")
+    "芋": "imo",       # potato (not "ɯ")
+    "栗": "kɯɾi",      # chestnut (not "ɾitsɯ")
+    "柿": "kaki",      # persimmon (already correct)
+    "桃": "momo",      # peach (not "toː")
+    "茶": "ʨa",        # tea
+    "酒": "sake",      # sake/alcohol (not "ɕɯ")
+    
+    # ============================================================
+    # COLORS (赤青白黒etc.)
+    # ============================================================
+    "赤": "aka",       # red (not "seki")
+    "青": "ao",        # blue (not "sei")
+    "白": "ɕiɾo",      # white (not "hakɯ")
+    "黒": "kɯɾo",      # black (not "kokɯ")
+    "黄": "ki",        # yellow (not "oː")
+    "緑": "midoɾi",    # green (not "ɾjokɯ")
+    "紫": "mɯɾasaki",  # purple (not "ɕi")
+    "茶": "ʨa",        # brown/tea
+    "灰": "çai",       # gray (not "kai")
+    "桃": "momo",      # pink/peach (not "toː")
+    
+    # ============================================================
+    # DIRECTIONS & POSITIONS (東西南北上下etc.)
+    # ============================================================
+    "東": "çiɡaɕi",    # east (not "toː")
+    "西": "niɕi",      # west (not "sei")
+    "南": "minami",    # south (not "naɴ")
+    "北": "kita",      # north (not "hokɯ")
+    "上": "ɯe",        # up/above (not "ʥoː")
+    "下": "ɕita",      # down/below (not "ka")
+    "前": "mae",       # front (not "zeɴ")
+    "後": "ɯɕiɾo",     # back/behind (not "ɡo")
+    "右": "miɡi",      # right (not "ɯː")
+    "左": "çidaɾi",    # left (not "sa")
+    "中": "naka",      # inside/middle (not "ʨɯː")
+    "外": "soto",      # outside (not "ɡai")
+    "内": "ɯʨi",       # inside (not "nai")
+    "横": "joko",      # side (not "oː")
+    "隣": "tonaɾi",    # next to (not "ɾiɴ")
+    "側": "soба",      # side (not "sokɯ")
+    "奥": "okɯ",       # interior/back (already correct)
+    "端": "haɕi",      # edge/end (not "taɴ")
+    "先": "saki",      # ahead/tip (not "seɴ")
+    "底": "soko",      # bottom (not "tei")
+    "頂": "itadaki",   # top/summit (not "ʨoː")
+    
+    # ============================================================
+    # PLACES & BUILDINGS (国町村家etc.)
+    # ============================================================
+    "国": "kɯɴi",      # country (not "kokɯ")
+    "都": "mijako",    # capital (not "to")
+    "京": "kjoː",      # capital (already correct for on-yomi context)
+    "町": "maʨi",      # town (not "ʨoː")
+    "村": "mɯɾa",      # village (not "soɴ")
+    "里": "sato",      # village/hometown (not "ɾi")
+    "家": "ie",        # house (not "ka")
+    "屋": "ja",        # shop/house (not "okɯ")
+    "庭": "niɰa",      # garden (not "tei")
+    "園": "sono",      # garden/park (not "eɴ")
+    "門": "moɴ",       # gate
+    "戸": "to",        # door (already correct)
+    "窓": "mado",      # window (not "soː")
+    "壁": "kabe",      # wall (not "heki")
+    "床": "jɯka",      # floor (not "ɕoː")
+    "天井": "teɴʥoː",  # ceiling (not "teɴsei")
+    "屋根": "jane",    # roof (not "okɯkoɴ")
+    "柱": "haɕiɾa",    # pillar (not "ʨɯː")
+    "道": "miʨi",      # road/way (not "doː")
+    "路": "miʨi",      # road/path (not "ɾo")
+    "橋": "haɕi",      # bridge (not "kjoː")
+    "坂": "saka",      # slope (not "haɴ")
+    "角": "kado",      # corner (not "kakɯ")
+    "街": "maʨi",      # town/street (not "ɡai")
+    "市": "iʨi",       # market/city (already correct)
+    "店": "mise",      # shop (not "teɴ")
+    "宿": "jado",      # inn (not "ɕɯkɯ")
+    "寺": "teɾa",      # temple (not "ʥi")
+    "社": "jaɕiɾo",    # shrine (not "ɕa")
+    "宮": "mija",      # shrine/palace (not "kjɯː")
+    
+    # ============================================================
+    # OBJECTS & THINGS (車船本etc.)
+    # ============================================================
+    "車": "kɯɾɯma",    # car (not "ɕa")
+    "船": "ɸɯɴe",      # ship (not "seɴ")
+    "舟": "ɸɯɴe",      # boat (not "ɕɯː")
+    "箱": "hako",      # box (not "soː")
+    "袋": "ɸɯkɯɾo",    # bag (not "tai")
+    "鞄": "kabaɴ",     # bag/briefcase (not "hoː")
+    "傘": "kasa",      # umbrella (not "saɴ")
+    "扇": "oːɡi",      # fan (not "seɴ")
+    "鏡": "kaɡami",    # mirror (not "kjoː")
+    "鍵": "kaɡi",      # key (not "keɴ")
+    "刀": "katana",    # sword (not "toː")
+    "剣": "tsɯɾɯɡi",   # sword (not "keɴ")
+    "弓": "jɯmi",      # bow (not "kjɯː")
+    "矢": "ja",        # arrow (not "ɕi")
+    "槍": "jaɾi",      # spear (not "soː")
+    "盾": "tate",      # shield (not "ʥɯɴ")
+    "鐘": "kaɴe",      # bell (not "ɕoː")
+    "鼓": "tsɯzɯmi",   # drum (not "ko")
+    "笛": "ɸɯe",       # flute (not "teki")
+    "琴": "koto",      # koto (not "kiɴ")
+    "糸": "ito",       # thread (not "ɕi")
+    "紐": "çimo",      # string/cord (not "ʨɯː")
+    "縄": "naɰa",      # rope (not "ʥoː")
+    "布": "nɯno",      # cloth (not "ɸɯ")
+    "絹": "kinɯ",      # silk (not "keɴ")
+    "綿": "ɰata",      # cotton (not "meɴ")
+    "紙": "kami",      # paper (not "ɕi")
+    "筆": "ɸɯde",      # brush (not "çitsɯ")
+    "墨": "sɯmi",      # ink (not "bokɯ")
+    "本": "hoɴ",       # book
+    "巻": "maki",      # scroll/volume (not "kaɴ")
+    "字": "ʥi",        # character
+    "名": "na",        # name (not "mei")
+    "印": "ɕiɾɯɕi",    # seal/stamp (not "iɴ")
+    
+    # ============================================================
+    # MONEY & VALUE (金銀玉etc.)
+    # ============================================================
+    "金": "kaɴe",      # money/gold (not "kiɴ" or "kana")
+    "銀": "ɡiɴ",       # silver (already correct in this context)
+    "銅": "akaɡaɴe",   # copper (not "doː")
+    "鉄": "kɯɾoɡaɴe", # iron (not "tetsɯ")
+    "玉": "tama",      # ball/jewel (not "ɡjokɯ")
+    "宝": "takaɾa",    # treasure (not "hoː")
+    "値": "ne",        # price/value (not "ʨi")
+    "価": "atai",      # value/price (not "ka")
+    
+    # ============================================================
+    # ABSTRACT CONCEPTS (力声音etc.)
+    # ============================================================
+    "力": "ʨikaɾa",    # power/strength (not "ɾjokɯ")
+    "声": "koe",       # voice (not "sei")
+    "音": "oto",       # sound (not "oɴ")
+    "響": "çibiki",    # echo/sound (not "kjoː")
+    "色": "iɾo",       # color (not "ɕokɯ" or "ɕiki")
+    "形": "katаʨi",    # shape (not "kei")
+    "影": "kage",      # shadow/silhouette (not "eː")
+    "姿": "sɯɡata",    # figure/appearance (not "ɕi")
+    "気": "ki",        # spirit/energy (already correct)
+    "魂": "tamaɕiː",   # soul (not "koɴ")
+    "霊": "tama",      # spirit (not "ɾeː")
+    "夢": "jɯme",      # dream (not "mɯ")
+    "涙": "namida",    # tears (not "ɾɯi")
+    "笑": "ɰaɾai",     # laugh (not "ɕoː")
+    "怒": "ikaɾi",     # anger (not "do")
+    "喜": "joɾokobi",  # joy (not "ki")
+    "悲": "kanaɕimi",  # sadness (not "çi")
+    "恋": "koi",       # love/romance (not "ɾeɴ")
+    "愛": "ai",        # love (already correct)
+    "憎": "nikɯɕimi",  # hatred (not "zoː")
+    "恨": "ɯɾami",     # resentment (not "koɴ")
+    "恐": "osoɾe",     # fear (not "kjoː")
+    "驚": "odoɾoki",   # surprise (not "kjoː")
+}
+
 # Common verbs in hiragana (often missing from dictionaries since they have Kanji equivalents)
 # These will automatically get conjugated by the verb system
 COMMON_VERBS_HIRAGANA = {
@@ -1224,6 +1588,21 @@ def main():
             particle_fixes += 1
     print(f"   Fixed {particle_fixes} particle pronunciations (ha -> wa)")
     
+    # Step 0.8: Fix standalone kanji readings (kun-yomi for standalone kanji)
+    print("\nStep 0.8: Fixing standalone kanji readings (kun-yomi corrections)...")
+    kanji_fixes = 0
+    for kanji, correct_phoneme in STANDALONE_KANJI_FIXES.items():
+        if kanji in data:
+            old_phoneme = data[kanji]
+            if old_phoneme != correct_phoneme:
+                data[kanji] = correct_phoneme
+                kanji_fixes += 1
+        else:
+            # Add if missing
+            data[kanji] = correct_phoneme
+            kanji_fixes += 1
+    print(f"   Fixed/added {kanji_fixes} standalone kanji readings (水→mizu, 山→yama, etc.)")
+    
     # Step 1: Add/fix missing basic kana, numbers, common characters, and verbs
     print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, common verbs, and characters...")
     added_count = 0
@@ -1465,6 +1844,7 @@ def main():
     print(f"\nSummary:")
     print(f"   - Original entries: {original_count}")
     print(f"   - Particle ha->wa fixes: {particle_fixes}")
+    print(f"   - Standalone kanji fixes: {kanji_fixes} (kun-yomi corrections)")
     print(f"   - Added missing kana/kanji: {added_count}")
     print(f"   - Verbs found: {verb_count}")
     print(f"   - Verb conjugations generated: {conjugation_count}")
@@ -1480,6 +1860,7 @@ def main():
         print(f"   - ja_words.txt (word segmentation dictionary)")
         print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
     print(f"\nNote: Particle ha -> wa fixes applied (de wa->dewa, kore wa->korewa, etc.)")
+    print(f"Note: Standalone kanji use kun-yomi (水=mizu not sui, 山=yama not san, etc.)")
     print(f"Note: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
     print(f"Note: Handles BOTH multi-char sequences (ts, dz, etc.) AND ligatures in verb conjugations")

@@ -338,8 +338,7 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
         if word_start > i:
             segments.append(TextSegment(text=text[i:word_start]))
         
-        # Extract the kanji and reading
-        kanji = text[word_start:bracket_open]
+        # Extract the reading
         reading = text[bracket_open + 1:bracket_close].strip()
         
         if not reading:
@@ -347,9 +346,57 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
             i = bracket_close + 1
             continue
         
+        # 🔥 SMART COMPOUND-AWARE KANJI BOUNDARY DETECTION
+        # Iterate through all possible kanji start positions and find LONGEST compound
+        best_kanji_start = word_start
+        best_compound_length = 0
+        after_bracket = bracket_close + 1
+        
+        if (segmenter or phoneme_root) and after_bracket < len(text):
+            for try_start in range(word_start, bracket_open):
+                # Check if kanji from this position + text after forms a compound
+                current = phoneme_root if phoneme_root else (segmenter.root if segmenter else None)
+                if not current:
+                    continue
+                
+                valid_path = True
+                # Walk through kanji characters from try_start
+                for char in text[try_start:bracket_open]:
+                    char_code = ord(char)
+                    if char_code not in current.children:
+                        valid_path = False
+                        break
+                    current = current.children[char_code]
+                
+                # Continue walking through text after bracket to find compounds
+                compound_length = 0
+                if valid_path and current:
+                    for j, char in enumerate(text[after_bracket:], start=0):
+                        char_code = ord(char)
+                        if char_code not in current.children:
+                            break
+                        current = current.children[char_code]
+                        
+                        # Check if this is a valid word ending
+                        if current.phoneme is not None:
+                            compound_length = j + 1
+                
+                # Track the longest compound
+                if compound_length > best_compound_length:
+                    best_compound_length = compound_length
+                    best_kanji_start = try_start
+            
+            # If we found a better starting position, update word_start and add prefix
+            if best_compound_length > 0 and best_kanji_start > word_start:
+                segments.append(TextSegment(text=text[word_start:best_kanji_start]))
+                word_start = best_kanji_start
+        
+        # Update kanji extraction with potentially new word_start
+        kanji = text[word_start:bracket_open]
+        
         # 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
         is_likely_name = False
-        after_bracket = bracket_close + 1
+        # after_bracket already declared above
         if after_bracket < len(text):
             next_char = ord(text[after_bracket]) if after_bracket < len(text) else 0
             # Check for common honorifics: さん、さま、様、君、ちゃん、くん、氏、殿、先生、師、長
@@ -395,22 +442,24 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                     phoneme_value = current.phoneme
                     
                     # 🔥 FIX: We must verify the phoneme MATCHES our reading!
-                    # Convert the reading (hiragana/katakana) to phonemes and compare
-                    reading_node = phoneme_root
-                    reading_found = True
+                    # Reading is hiragana/katakana, so look up EACH CHARACTER individually
+                    # and concatenate their phonemes
                     
+                    reading_phoneme = ''
+                    all_chars_found = True
                     for char in reading:
                         char_code = ord(char)
-                        if char_code not in reading_node.children:
-                            reading_found = False
+                        if char_code not in phoneme_root.children:
+                            all_chars_found = False
                             break
-                        reading_node = reading_node.children[char_code]
+                        char_node = phoneme_root.children[char_code]
+                        if char_node.phoneme is None or char_node.phoneme == "":
+                            all_chars_found = False
+                            break
+                        reading_phoneme += char_node.phoneme
                     
-                    # Only split if the phoneme for the substring matches the reading's phoneme
-                    phonemes_match = False
-                    if reading_found and reading_node.phoneme is not None and reading_node.phoneme != "":
-                        reading_phoneme = reading_node.phoneme
-                        phonemes_match = (phoneme_value == reading_phoneme)
+                    # Compare concatenated reading phonemes with kanji phoneme
+                    phonemes_match = all_chars_found and (phoneme_value == reading_phoneme)
                     
                     # Found a match! Check if we need to split
                     if try_length < len(kanji) and phonemes_match:
@@ -424,9 +473,19 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                     if phonemes_match:
                         break
         
-        # Add the furigana segment
-        segments.append(TextSegment(text=final_kanji, furigana_hint=reading))
-        i = bracket_close + 1
+        # 🔥 USE COMPOUND DETECTION RESULT
+        # We already found the best compound in the earlier detection phase
+        used_compound = False
+        if best_compound_length > 0:
+            compound = reading + text[after_bracket:after_bracket + best_compound_length]
+            segments.append(TextSegment(text=compound))
+            i = after_bracket + best_compound_length
+            used_compound = True
+        
+        if not used_compound:
+            # Add the furigana segment
+            segments.append(TextSegment(text=final_kanji, furigana_hint=reading))
+            i = bracket_close + 1
     
     return segments
 

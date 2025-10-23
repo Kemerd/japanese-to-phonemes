@@ -809,8 +809,7 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
       segments.add(TextSegment.normal(textStr, bytePositions[pos]));
     }
     
-    // Extract the kanji and reading
-    final kanji = String.fromCharCodes(runes.sublist(wordStart, bracketOpen));
+    // Extract the reading
     final reading = String.fromCharCodes(runes.sublist(bracketOpen + 1, bracketClose)).trim();
     
     if (reading.isEmpty) {
@@ -819,9 +818,54 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
       continue;
     }
     
+    // 🔥 SMART COMPOUND-AWARE KANJI BOUNDARY DETECTION
+    int bestKanjiStart = wordStart;
+    int bestCompoundLength = 0;
+    final afterBracket = bracketClose + 1;
+    
+    if ((segmenter != null || phonemeRoot != null) && afterBracket < runes.length) {
+      for (int tryStart = wordStart; tryStart < bracketOpen; tryStart++) {
+        TrieNode? current = phonemeRoot ?? segmenter?.getRoot();
+        if (current == null) continue;
+        
+        bool validPath = true;
+        for (int i = tryStart; i < bracketOpen && current != null; i++) {
+          current = current.children[runes[i]];
+          if (current == null) {
+            validPath = false;
+            break;
+          }
+        }
+        
+        int compoundLength = 0;
+        if (validPath && current != null) {
+          for (int i = afterBracket; i < runes.length && current != null; i++) {
+            current = current.children[runes[i]];
+            if (current == null) break;
+            if (current?.phoneme != null) {
+              compoundLength = i - afterBracket + 1;
+            }
+          }
+        }
+        
+        if (compoundLength > bestCompoundLength) {
+          bestCompoundLength = compoundLength;
+          bestKanjiStart = tryStart;
+        }
+      }
+      
+      if (bestCompoundLength > 0 && bestKanjiStart > wordStart) {
+        final prefix = String.fromCharCodes(runes.sublist(wordStart, bestKanjiStart));
+        segments.add(TextSegment.normal(prefix, bytePositions[wordStart]));
+        wordStart = bestKanjiStart;
+      }
+    }
+    
+    final kanji = String.fromCharCodes(runes.sublist(wordStart, bracketOpen));
+    
     // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
     bool isLikelyName = false;
-    final afterBracket = bracketClose + 1;
+    // afterBracket already declared above
     if (afterBracket < runes.length) {
       final nextChar = runes[afterBracket];
       if (nextChar == 0x3055) { // さ
@@ -867,24 +911,21 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
           final phonemeValue = current.phoneme!;
           
           // 🔥 FIX: We must verify the phoneme MATCHES our reading!
-          // Convert the reading (hiragana/katakana) to phonemes and compare
-          TrieNode? readingNode = phonemeRoot;
-          bool readingFound = true;
+          // Reading is hiragana/katakana, so look up EACH CHARACTER individually
+          final readingRunes = reading.runes.toList();
+          String readingPhoneme = '';
+          bool allCharsFound = true;
           
-          for (var r = readingStart; r < readingEnd && readingNode != null; r++) {
-            readingNode = readingNode.children[runes[r]];
-            if (readingNode == null) {
-              readingFound = false;
+          for (final rune in readingRunes) {
+            final charNode = phonemeRoot.children[rune];
+            if (charNode == null || charNode.phoneme == null || charNode.phoneme!.isEmpty) {
+              allCharsFound = false;
               break;
             }
+            readingPhoneme += charNode.phoneme!;
           }
           
-          // Only split if the phoneme for the substring matches the reading's phoneme
-          final phonemesMatch = readingFound && 
-                                readingNode != null && 
-                                readingNode.phoneme != null &&
-                                readingNode.phoneme!.isNotEmpty &&
-                                phonemeValue == readingNode.phoneme;
+          final phonemesMatch = allCharsFound && phonemeValue == readingPhoneme;
           
           // Found a match! Check if we need to split
           if (tryLength < kanjiCharCount && phonemesMatch) {
@@ -905,40 +946,15 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
       }
     }
     
-    // 🔥 SMART COMPOUND WORD DETECTION USING TRIE'S LONGEST-MATCH
+    // 🔥 USE COMPOUND DETECTION RESULT
     bool usedCompound = false;
     
-    if (segmenter != null && afterBracket < runes.length) {
-      // Use trie to find longest match starting from wordStart position
-      int matchLength = 0;
-      TrieNode? current = segmenter.getRoot();
-      
-      // Walk trie through kanji characters first
-      for (int i = wordStart; i < bracketOpen && current != null; i++) {
-        current = current.children[runes[i]];
-      }
-      
-      // Continue walking through characters after the bracket
-      if (current != null) {
-        for (int i = afterBracket; i < runes.length && current != null; i++) {
-          current = current.children[runes[i]];
-          
-          // Check if this position marks a valid word ending
-          if (current?.phoneme != null) {
-            // Found a compound! Track it as the longest so far
-            matchLength = i - afterBracket + 1;
-          }
-        }
-      }
-      
-      // If we found a compound word, use it with the furigana reading
-      if (matchLength > 0) {
-        final suffix = String.fromCharCodes(runes.sublist(afterBracket, afterBracket + matchLength));
-        final compound = reading + suffix;
-        segments.add(TextSegment.normal(compound, bytePositions[wordStart]));
-        pos = afterBracket + matchLength;
-        usedCompound = true;
-      }
+    if (bestCompoundLength > 0) {
+      final suffix = String.fromCharCodes(runes.sublist(afterBracket, afterBracket + bestCompoundLength));
+      final compound = reading + suffix;
+      segments.add(TextSegment.normal(compound, bytePositions[wordStart]));
+      pos = afterBracket + bestCompoundLength;
+      usedCompound = true;
     }
     
     if (!usedCompound) {
