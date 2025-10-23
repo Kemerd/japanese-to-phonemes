@@ -927,22 +927,75 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
                     }
                 }
                 
-                // Not a word itself - check if there's ANY kanji before this position
-                let has_kanji_before = chars[pos..search_pos].iter().any(|&c| {
-                    let code = c as u32;
-                    code >= 0x4E00 || (code >= 0x3400 && code <= 0x9FFF)
-                });
+                // Not a word itself - check if this kana is part of a compound with kanji before it
+                // Find the nearest kanji before this kana position
+                let mut nearest_kanji_pos = search_pos;
+                let mut found_kanji = false;
+                for check_pos in (pos..search_pos).rev() {
+                    if !is_kana(chars[check_pos]) {
+                        // Check it's not punctuation
+                        let check_cp = chars[check_pos] as u32;
+                        if check_cp >= 0x4E00 || (check_cp >= 0x3400 && check_cp <= 0x9FFF) {  // CJK kanji ranges
+                            nearest_kanji_pos = check_pos;
+                            found_kanji = true;
+                            break;
+                        }
+                    }
+                }
                 
-                if !has_kanji_before {
-                    // This kana is not sandwiched - it's a prefix word → stop here
+                if !found_kanji {
+                    // No kanji before this kana - it's a prefix word → stop here
                     word_start = search_pos + 1;
                     break;
                 }
+                
+                // Check if kanji+kana sequence forms a complete word
+                // Example: 一つ should be detected as a complete word, not okurigana
+                if let Some(phoneme_trie) = phoneme_root {
+                    let mut check_node = Some(phoneme_trie);
+                    let mut forms_word = false;
+                    
+                    // Walk from nearest_kanji_pos to search_pos (end of kana sequence)
+                    for i in nearest_kanji_pos..=search_pos {
+                        if let Some(node) = check_node {
+                            check_node = node.children.get(&chars[i]);
+                            if check_node.is_none() {
+                                break;
+                            }
+                            
+                            // Check if this forms a complete word at the end of the kana sequence
+                            if i == search_pos {
+                                if let Some(n) = check_node {
+                                    if let Some(ref ph) = n.phoneme {
+                                        if !ph.is_empty() {
+                                            forms_word = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if forms_word {
+                        // This kanji+kana forms a complete word → stop here
+                        word_start = search_pos + 1;
+                        break;
+                    }
+                }
+                
                 // Otherwise, this kana is sandwiched (okurigana) → continue
             }
             
             // Update word_start to include this character
             word_start = search_pos;
+        }
+        
+        // 🔥 FIX: Skip any leading kana between word_start and last_kanji_pos
+        // Example: "一つだけ持「も」" → word_start=2 (だ), last_kanji_pos=4 (持)
+        // We should skip だけ and start from 持
+        while word_start < last_kanji_pos && is_kana(chars[word_start]) {
+            word_start += 1;
         }
         
         // Add text from current position up to where the word/kanji starts
@@ -1034,6 +1087,55 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
             }
         }
         
+        // 🔥 SMART OKURIGANA DETECTION WITH FURIGANA HINTS
+        // Check if there's okurigana (trailing kana) after the bracket that should be
+        // combined with the furigana reading to form a complete word.
+        // Example: 話「はな」す → Check if 話す exists in dictionary → YES → Combine はな+す
+        let mut best_okurigana_length = 0;
+        
+        if let Some(phoneme_trie) = phoneme_root {
+            if after_bracket < chars.len() {
+                // Check if kanji (before bracket) + kana (after bracket) forms a word in the dictionary
+                let mut current = Some(phoneme_trie);
+                let mut valid_path = true;
+                
+                // Walk through kanji characters (from word_start to bracket_open)
+                for i in word_start..bracket_open {
+                    if let Some(node) = current {
+                        current = node.children.get(&chars[i]);
+                        if current.is_none() {
+                            valid_path = false;
+                            break;
+                        }
+                    }
+                }
+                
+                // If we made it through the kanji, continue with characters after bracket (okurigana)
+                if valid_path && current.is_some() {
+                    // Try to match as much okurigana as possible
+                    for i in after_bracket..chars.len() {
+                        if let Some(node) = current {
+                            current = node.children.get(&chars[i]);
+                            if current.is_none() {
+                                break;
+                            }
+                            
+                            // Check if this forms a valid word (kanji + okurigana)
+                            if let Some(n) = current {
+                                if let Some(ref ph) = n.phoneme {
+                                    if !ph.is_empty() {
+                                        best_okurigana_length = i - after_bracket + 1;
+                                    }
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
         // 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
         let mut final_kanji = kanji.clone();
         let mut final_word_start = word_start;
@@ -1118,21 +1220,42 @@ fn parse_furigana_segments(text: &str, segmenter: Option<&WordSegmenter>, phonem
             }
         }
         
-        // 🔥 USE COMPOUND DETECTION RESULT
-        let mut used_compound = false;
+        // 🔥 USE OKURIGANA DETECTION RESULT
+        // If we found okurigana, combine it with the furigana reading
+        let mut used_okurigana = false;
         
-        if best_compound_length > 0 {
-            let suffix: String = chars[after_bracket..after_bracket + best_compound_length].iter().collect();
-            let compound = format!("{}{}", reading, suffix);
-            segments.push(TextSegment::new_normal(compound, byte_positions[word_start]));
-            pos = after_bracket + best_compound_length;
-            used_compound = true;
+        if best_okurigana_length > 0 {
+            // We found okurigana! Combine furigana reading + okurigana kana
+            // Example: 話「はな」す → はな + す = はなす
+            let okurigana: String = chars[after_bracket..after_bracket + best_okurigana_length].iter().collect();
+            let combined = format!("{}{}", reading, okurigana);
+            
+            // 🔥 KEY FIX: Create as FURIGANA_HINT segment so it's treated as a single word!
+            // The "text" field contains the original kanji+okurigana (for reference)
+            // The "reading" field contains the combined reading that should be used
+            let original_with_okurigana = format!("{}{}", final_kanji, okurigana);
+            segments.push(TextSegment::new_furigana(original_with_okurigana, combined, byte_positions[final_word_start]));
+            pos = after_bracket + best_okurigana_length;
+            used_okurigana = true;
         }
         
-        if !used_compound {
-            // No compound found, use the furigana hint
-            segments.push(TextSegment::new_furigana(final_kanji, reading, byte_positions[final_word_start]));
-            pos = bracket_close + 1;
+        if !used_okurigana {
+            // 🔥 USE COMPOUND DETECTION RESULT
+            let mut used_compound = false;
+            
+            if best_compound_length > 0 {
+                let suffix: String = chars[after_bracket..after_bracket + best_compound_length].iter().collect();
+                let compound = format!("{}{}", reading, suffix);
+                segments.push(TextSegment::new_normal(compound, byte_positions[word_start]));
+                pos = after_bracket + best_compound_length;
+                used_compound = true;
+            }
+            
+            if !used_compound {
+                // No compound found, use the furigana hint
+                segments.push(TextSegment::new_furigana(final_kanji, reading, byte_positions[final_word_start]));
+                pos = bracket_close + 1;
+            }
         }
     }
     

@@ -895,29 +895,65 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
           }
         }
         
-        // Not a word itself - check if there's ANY non-kana (kanji) before this position
-        let hasKanjiBefore = false;
+        // Not a word itself - check if this kana is part of a compound with kanji before it
+        // Find the nearest kanji before this kana position
+        let nearestKanjiPos = searchPos;
+        let foundKanji = false;
         for (let checkPos = searchPos; checkPos > pos; checkPos--) {
           if (!isKana(codePoints[checkPos - 1])) {
             // Check it's not punctuation
             const checkCp = codePoints[checkPos - 1];
             if (checkCp >= 0x4E00 || (checkCp >= 0x3400 && checkCp <= 0x9FFF)) {  // CJK kanji ranges
-              hasKanjiBefore = true;
+              nearestKanjiPos = checkPos - 1;
+              foundKanji = true;
               break;
             }
           }
         }
         
-        if (!hasKanjiBefore) {
-          // This kana is not sandwiched - it's a prefix word → stop here
+        if (!foundKanji) {
+          // No kanji before this kana - it's a prefix word → stop here
           wordStart = searchPos + 1;
           break;
         }
+        
+        // Check if kanji+kana sequence forms a complete word
+        // Example: 一つ should be detected as a complete word, not okurigana
+        if (phonemeRoot) {
+          let checkNode = phonemeRoot;
+          let formsWord = false;
+          
+          // Walk from nearestKanjiPos to searchPos (end of kana sequence)
+          for (let i = nearestKanjiPos; i <= searchPos && checkNode !== null; i++) {
+            checkNode = checkNode.children.get(codePoints[i]) || null;
+            if (checkNode === null) break;
+            
+            // Check if this forms a complete word at the end of the kana sequence
+            if (i === searchPos && checkNode.phoneme !== null && checkNode.phoneme.length > 0) {
+              formsWord = true;
+              break;
+            }
+          }
+          
+          if (formsWord) {
+            // This kanji+kana forms a complete word → stop here
+            wordStart = searchPos + 1;
+            break;
+          }
+        }
+        
         // Otherwise, this kana is sandwiched (okurigana) → continue
       }
       
       // Update word_start to include this character
       wordStart = searchPos;
+    }
+    
+    // 🔥 FIX: Skip any leading kana between wordStart and lastKanjiPos
+    // Example: "一つだけ持「も」" → wordStart=2 (だ), lastKanjiPos=4 (持)
+    // We should skip だけ and start from 持
+    while (wordStart < lastKanjiPos && isKana(codePoints[wordStart])) {
+      wordStart++;
     }
     
     // Add text from current position up to where the word/kanji starts
@@ -1006,9 +1042,8 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
     }
     
     // Update kanji extraction with potentially new wordStart
-    const kanjiStartIdx = positions[wordStart];
     const kanjiEndIdx = positions[bracketOpen];
-    const kanji = text.substring(kanjiStartIdx, kanjiEndIdx);
+    const kanji = text.substring(positions[wordStart], kanjiEndIdx);
     
     // 🔥 SMART NAME DETECTION: Check if honorific follows the furigana hint
     // If we see さん、さま、様、君、ちゃん、くん etc. after the hint,
@@ -1043,6 +1078,41 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
         isLikelyName = true;
       } else if (nextChar === 0x9577) { // 長 (会長、社長、部長、課長 etc.)
         isLikelyName = true;
+      }
+    }
+    
+    // 🔥 SMART OKURIGANA DETECTION WITH FURIGANA HINTS
+    // Check if there's okurigana (trailing kana) after the bracket that should be
+    // combined with the furigana reading to form a complete word.
+    // Example: 話「はな」す → Check if 話す exists in dictionary → YES → Combine はな+す
+    let bestOkuriganaLength = 0;
+    
+    if (phonemeRoot && afterBracket < codePoints.length) {
+      // Check if kanji (before bracket) + kana (after bracket) forms a word in the dictionary
+      let current = phonemeRoot;
+      let validPath = true;
+      
+      // Walk through kanji characters (from wordStart to bracketOpen)
+      for (let i = wordStart; i < bracketOpen && current !== null; i++) {
+        current = current.children.get(codePoints[i]) || null;
+        if (current === null) {
+          validPath = false;
+          break;
+        }
+      }
+      
+      // If we made it through the kanji, continue with characters after bracket (okurigana)
+      if (validPath && current !== null) {
+        // Try to match as much okurigana as possible
+        for (let i = afterBracket; i < codePoints.length && current !== null; i++) {
+          current = current.children.get(codePoints[i]) || null;
+          if (current === null) break;
+          
+          // Check if this forms a valid word (kanji + okurigana)
+          if (current.phoneme !== null && current.phoneme.length > 0) {
+            bestOkuriganaLength = i - afterBracket + 1;
+          }
+        }
       }
     }
     
@@ -1140,32 +1210,59 @@ function parseFuriganaSegments(text, segmenter = null, phonemeRoot = null) {
       }
     }
     
-    // 🔥 USE COMPOUND DETECTION RESULT
-    // We already found the best compound in the earlier detection phase
-    let usedCompound = false;
+    // 🔥 USE OKURIGANA DETECTION RESULT
+    // If we found okurigana, combine it with the furigana reading
+    let usedOkurigana = false;
     
-    if (bestCompoundLength > 0) {
-      const compoundEndIdx = positions[afterBracket + bestCompoundLength];
-      const compound = reading + text.substring(positions[afterBracket], compoundEndIdx);
-      segments.push({
-        type: SegmentType.NORMAL_TEXT,
-        text: compound,
-        reading: '',
-        originalPos: kanjiStartIdx
-      });
-      pos = afterBracket + bestCompoundLength;
-      usedCompound = true;
-    }
-    
-    if (!usedCompound) {
-      // No compound found, use the furigana hint
+    if (bestOkuriganaLength > 0) {
+      // We found okurigana! Combine furigana reading + okurigana kana
+      // Example: 話「はな」す → はな + す = はなす
+      const okuriganaEndIdx = positions[afterBracket + bestOkuriganaLength];
+      const okurigana = text.substring(positions[afterBracket], okuriganaEndIdx);
+      const combined = reading + okurigana;
+      
+      // 🔥 KEY FIX: Create as FURIGANA_HINT segment so it's treated as a single word!
+      // The "text" field contains the original kanji+okurigana (for reference)
+      // The "reading" field contains the combined reading that should be used
+      const originalWithOkurigana = finalKanji + okurigana;
       segments.push({
         type: SegmentType.FURIGANA_HINT,
-        text: finalKanji,
-        reading: reading,
+        text: originalWithOkurigana,
+        reading: combined,
         originalPos: kanjiStartIdx
       });
-      pos = bracketClose + 1;
+      pos = afterBracket + bestOkuriganaLength;
+      usedOkurigana = true;
+    }
+    
+    if (!usedOkurigana) {
+      // 🔥 USE COMPOUND DETECTION RESULT
+      // We already found the best compound in the earlier detection phase
+      let usedCompound = false;
+      
+      if (bestCompoundLength > 0) {
+        const compoundEndIdx = positions[afterBracket + bestCompoundLength];
+        const compound = reading + text.substring(positions[afterBracket], compoundEndIdx);
+        segments.push({
+          type: SegmentType.NORMAL_TEXT,
+          text: compound,
+          reading: '',
+          originalPos: kanjiStartIdx
+        });
+        pos = afterBracket + bestCompoundLength;
+        usedCompound = true;
+      }
+      
+      if (!usedCompound) {
+        // No compound found, use the furigana hint
+        segments.push({
+          type: SegmentType.FURIGANA_HINT,
+          text: finalKanji,
+          reading: reading,
+          originalPos: kanjiStartIdx
+        });
+        pos = bracketClose + 1;
+      }
     }
   }
   

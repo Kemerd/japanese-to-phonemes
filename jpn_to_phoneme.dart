@@ -786,21 +786,65 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
           }
         }
         
-        // Not a word itself - check if there's ANY kanji before this position
-        final hasKanjiBefore = runes.sublist(pos, searchPos).any((r) {
-          return r >= 0x4E00 || (r >= 0x3400 && r <= 0x9FFF);
-        });
+        // Not a word itself - check if this kana is part of a compound with kanji before it
+        // Find the nearest kanji before this kana position
+        var nearestKanjiPos = searchPos;
+        var foundKanji = false;
+        for (var checkPos = searchPos; checkPos > pos; checkPos--) {
+          if (!_isKana(runes[checkPos - 1])) {
+            // Check it's not punctuation
+            final checkCp = runes[checkPos - 1];
+            if (checkCp >= 0x4E00 || (checkCp >= 0x3400 && checkCp <= 0x9FFF)) {  // CJK kanji ranges
+              nearestKanjiPos = checkPos - 1;
+              foundKanji = true;
+              break;
+            }
+          }
+        }
         
-        if (!hasKanjiBefore) {
-          // This kana is not sandwiched - it's a prefix word → stop here
+        if (!foundKanji) {
+          // No kanji before this kana - it's a prefix word → stop here
           wordStart = searchPos + 1;
           break;
         }
+        
+        // Check if kanji+kana sequence forms a complete word
+        // Example: 一つ should be detected as a complete word, not okurigana
+        if (phonemeRoot != null) {
+          TrieNode? checkNode = phonemeRoot;
+          var formsWord = false;
+          
+          // Walk from nearestKanjiPos to searchPos (end of kana sequence)
+          for (var i = nearestKanjiPos; i <= searchPos && checkNode != null; i++) {
+            checkNode = checkNode.children[runes[i]];
+            if (checkNode == null) break;
+            
+            // Check if this forms a complete word at the end of the kana sequence
+            if (i == searchPos && checkNode.phoneme != null && checkNode.phoneme!.isNotEmpty) {
+              formsWord = true;
+              break;
+            }
+          }
+          
+          if (formsWord) {
+            // This kanji+kana forms a complete word → stop here
+            wordStart = searchPos + 1;
+            break;
+          }
+        }
+        
         // Otherwise, this kana is sandwiched (okurigana) → continue
       }
       
       // Update word_start to include this character
       wordStart = searchPos;
+    }
+    
+    // 🔥 FIX: Skip any leading kana between wordStart and lastKanjiPos
+    // Example: "一つだけ持「も」" → wordStart=2 (だ), lastKanjiPos=4 (持)
+    // We should skip だけ and start from 持
+    while (wordStart < lastKanjiPos && _isKana(runes[wordStart])) {
+      wordStart++;
     }
     
     // Add text from current position up to where the word/kanji starts
@@ -842,7 +886,7 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
           for (int i = afterBracket; i < runes.length && current != null; i++) {
             current = current.children[runes[i]];
             if (current == null) break;
-            if (current?.phoneme != null) {
+            if (current.phoneme != null) {
               compoundLength = i - afterBracket + 1;
             }
           }
@@ -877,6 +921,41 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
         }
       } else if ([0x69D8, 0x541B, 0x6C0F, 0x6BBF, 0x5148, 0x5E2B, 0x9577, 0x3061, 0x304F, 0x6559, 0x8B1B].contains(nextChar)) {
         isLikelyName = true;
+      }
+    }
+    
+    // 🔥 SMART OKURIGANA DETECTION WITH FURIGANA HINTS
+    // Check if there's okurigana (trailing kana) after the bracket that should be
+    // combined with the furigana reading to form a complete word.
+    // Example: 話「はな」す → Check if 話す exists in dictionary → YES → Combine はな+す
+    var bestOkuriganaLength = 0;
+    
+    if (phonemeRoot != null && afterBracket < runes.length) {
+      // Check if kanji (before bracket) + kana (after bracket) forms a word in the dictionary
+      TrieNode? current = phonemeRoot;
+      var validPath = true;
+      
+      // Walk through kanji characters (from wordStart to bracketOpen)
+      for (var i = wordStart; i < bracketOpen && current != null; i++) {
+        current = current.children[runes[i]];
+        if (current == null) {
+          validPath = false;
+          break;
+        }
+      }
+      
+      // If we made it through the kanji, continue with characters after bracket (okurigana)
+      if (validPath && current != null) {
+        // Try to match as much okurigana as possible
+        for (var i = afterBracket; i < runes.length && current != null; i++) {
+          current = current.children[runes[i]];
+          if (current == null) break;
+          
+          // Check if this forms a valid word (kanji + okurigana)
+          if (current.phoneme != null && current.phoneme!.isNotEmpty) {
+            bestOkuriganaLength = i - afterBracket + 1;
+          }
+        }
       }
     }
     
@@ -946,21 +1025,42 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
       }
     }
     
-    // 🔥 USE COMPOUND DETECTION RESULT
-    bool usedCompound = false;
+    // 🔥 USE OKURIGANA DETECTION RESULT
+    // If we found okurigana, combine it with the furigana reading
+    bool usedOkurigana = false;
     
-    if (bestCompoundLength > 0) {
-      final suffix = String.fromCharCodes(runes.sublist(afterBracket, afterBracket + bestCompoundLength));
-      final compound = reading + suffix;
-      segments.add(TextSegment.normal(compound, bytePositions[wordStart]));
-      pos = afterBracket + bestCompoundLength;
-      usedCompound = true;
+    if (bestOkuriganaLength > 0) {
+      // We found okurigana! Combine furigana reading + okurigana kana
+      // Example: 話「はな」す → はな + す = はなす
+      final okurigana = String.fromCharCodes(runes.sublist(afterBracket, afterBracket + bestOkuriganaLength));
+      final combined = reading + okurigana;
+      
+      // 🔥 KEY FIX: Create as FURIGANA_HINT segment so it's treated as a single word!
+      // The "text" field contains the original kanji+okurigana (for reference)
+      // The "reading" field contains the combined reading that should be used
+      final originalWithOkurigana = finalKanji + okurigana;
+      segments.add(TextSegment.furigana(originalWithOkurigana, combined, bytePositions[finalWordStart]));
+      pos = afterBracket + bestOkuriganaLength;
+      usedOkurigana = true;
     }
     
-    if (!usedCompound) {
-      // No compound found, use the furigana hint
-      segments.add(TextSegment.furigana(finalKanji, reading, bytePositions[finalWordStart]));
-      pos = bracketClose + 1;
+    if (!usedOkurigana) {
+      // 🔥 USE COMPOUND DETECTION RESULT
+      bool usedCompound = false;
+      
+      if (bestCompoundLength > 0) {
+        final suffix = String.fromCharCodes(runes.sublist(afterBracket, afterBracket + bestCompoundLength));
+        final compound = reading + suffix;
+        segments.add(TextSegment.normal(compound, bytePositions[wordStart]));
+        pos = afterBracket + bestCompoundLength;
+        usedCompound = true;
+      }
+      
+      if (!usedCompound) {
+        // No compound found, use the furigana hint
+        segments.add(TextSegment.furigana(finalKanji, reading, bytePositions[finalWordStart]));
+        pos = bracketClose + 1;
+      }
     }
   }
   

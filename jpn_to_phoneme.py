@@ -412,6 +412,38 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
             elif next_char in [0x6559, 0x8B1B]:  # 教 or 講
                 is_likely_name = True
         
+        # 🔥 SMART OKURIGANA DETECTION WITH FURIGANA HINTS
+        # Check if there's okurigana (trailing kana) after the bracket that should be
+        # combined with the furigana reading to form a complete word.
+        # Example: 話「はな」す → Check if 話す exists in dictionary → YES → Combine はな+す
+        best_okurigana_length = 0
+        
+        if phoneme_root and after_bracket < len(text):
+            # Check if kanji (before bracket) + kana (after bracket) forms a word in the dictionary
+            current = phoneme_root
+            valid_path = True
+            
+            # Walk through kanji characters (from word_start to bracket_open)
+            for char in text[word_start:bracket_open]:
+                char_code = ord(char)
+                if char_code not in current.children:
+                    valid_path = False
+                    break
+                current = current.children[char_code]
+            
+            # If we made it through the kanji, continue with characters after bracket (okurigana)
+            if valid_path and current:
+                # Try to match as much okurigana as possible
+                for j, char in enumerate(text[after_bracket:], start=0):
+                    char_code = ord(char)
+                    if char_code not in current.children:
+                        break
+                    current = current.children[char_code]
+                    
+                    # Check if this forms a valid word (kanji + okurigana)
+                    if current.phoneme is not None and current.phoneme != "":
+                        best_okurigana_length = j + 1
+        
         # 🔥 SMART HINT BACKTRACKING: Check if reading matches from the END
         final_kanji = kanji
         final_word_start = word_start
@@ -473,19 +505,36 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                     if phonemes_match:
                         break
         
-        # 🔥 USE COMPOUND DETECTION RESULT
-        # We already found the best compound in the earlier detection phase
-        used_compound = False
-        if best_compound_length > 0:
-            compound = reading + text[after_bracket:after_bracket + best_compound_length]
-            segments.append(TextSegment(text=compound))
-            i = after_bracket + best_compound_length
-            used_compound = True
+        # 🔥 USE OKURIGANA DETECTION RESULT
+        # If we found okurigana, combine it with the furigana reading
+        used_okurigana = False
         
-        if not used_compound:
-            # Add the furigana segment
-            segments.append(TextSegment(text=final_kanji, furigana_hint=reading))
-            i = bracket_close + 1
+        if best_okurigana_length > 0:
+            # We found okurigana! Combine furigana reading + okurigana kana
+            # Example: 話「はな」す → はな + す = はなす
+            okurigana = text[after_bracket:after_bracket + best_okurigana_length]
+            combined = reading + okurigana
+            
+            # 🔥 KEY FIX: Use furigana_hint to mark this as a single word
+            # The combined reading should be used for phoneme conversion
+            segments.append(TextSegment(text=final_kanji + okurigana, furigana_hint=combined))
+            i = after_bracket + best_okurigana_length
+            used_okurigana = True
+        
+        if not used_okurigana:
+            # 🔥 USE COMPOUND DETECTION RESULT
+            # We already found the best compound in the earlier detection phase
+            used_compound = False
+            if best_compound_length > 0:
+                compound = reading + text[after_bracket:after_bracket + best_compound_length]
+                segments.append(TextSegment(text=compound))
+                i = after_bracket + best_compound_length
+                used_compound = True
+            
+            if not used_compound:
+                # Add the furigana segment
+                segments.append(TextSegment(text=final_kanji, furigana_hint=reading))
+                i = bracket_close + 1
     
     return segments
 
