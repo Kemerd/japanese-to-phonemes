@@ -295,6 +295,13 @@ class TextSegment:
     furigana_hint: str = ""
 
 
+@dataclass
+class SegmentedWord:
+    """Represents a segmented word with metadata about its origin"""
+    text: str
+    is_furigana_reading: bool = False  # True if this came from a furigana hint and shouldn't be re-converted
+
+
 def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[TextSegment]:
     """
     Parse text into segments, extracting furigana hints with SMART ALGORITHMS.
@@ -754,7 +761,7 @@ def convert_detailed_with_segmentation(converter: PhonemeConverter, text: str, s
     
     for segment in segments:
         if segment.furigana_hint:
-            # Use the furigana hint for direct conversion
+            # Convert the furigana reading (hiragana/katakana) directly to phonemes
             hint_result = converter.convert_detailed(segment.furigana_hint)
             
             # Create a match for the original text with hint's phoneme
@@ -772,15 +779,26 @@ def convert_detailed_with_segmentation(converter: PhonemeConverter, text: str, s
             words = segmenter.segment(segment.text)
             
             for word in words:
-                word_result = converter.convert_detailed(word)
+                # Special handling for the topic particle は → "wa"
+                if word == 'は':
+                    phoneme_parts.append('wa')
+                    all_matches.append(Match(
+                        original=word,
+                        phoneme='wa',
+                        start_index=byte_offset
+                    ))
+                else:
+                    # Normal word - convert through phoneme dictionary
+                    word_result = converter.convert_detailed(word)
+                    
+                    # Adjust match positions
+                    for match in word_result.matches:
+                        match.start_index += byte_offset
+                        all_matches.append(match)
+                    
+                    phoneme_parts.append(word_result.phonemes)
+                    all_unmatched.extend(word_result.unmatched)
                 
-                # Adjust match positions
-                for match in word_result.matches:
-                    match.start_index += byte_offset
-                    all_matches.append(match)
-                
-                phoneme_parts.append(word_result.phonemes)
-                all_unmatched.extend(word_result.unmatched)
                 byte_offset += len(word.encode('utf-8'))
     
     return ConversionResult(

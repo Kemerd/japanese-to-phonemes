@@ -342,6 +342,14 @@ class TextSegment {
   }
 }
 
+/// Represents a segmented word with metadata about its origin
+class SegmentedWord {
+  final String text;
+  final bool isFuriganaReading;  // True if this came from a furigana hint and shouldn't be re-converted
+  
+  SegmentedWord(this.text, {this.isFuriganaReading = false});
+}
+
 /// Word segmenter using longest-match algorithm with word dictionary
 /// Splits Japanese text into words for better phoneme spacing
 class WordSegmenter {
@@ -508,14 +516,15 @@ class WordSegmenter {
   /// treating each segment as an atomic unit during segmentation.
   /// 
   /// @param phonemeRoot Optional phoneme trie root for fallback lookups
-  List<String> segmentFromSegments(List<TextSegment> segments, {TrieNode? phonemeRoot}) {
-    final words = <String>[];
+  List<SegmentedWord> segmentFromSegments(List<TextSegment> segments, {TrieNode? phonemeRoot}) {
+    final words = <SegmentedWord>[];
     
     // Process each segment
     for (final segment in segments) {
       // For furigana segments, treat the entire reading as one word
+      // Mark it as furigana so conversion knows to use it directly
       if (segment.type == SegmentType.furiganaHint) {
-        words.add(segment.reading);
+        words.add(SegmentedWord(segment.reading, isFuriganaReading: true));
         continue;
       }
       
@@ -578,7 +587,7 @@ class WordSegmenter {
         // If it's a standalone particle, treat it as a single token
         if (treatAsParticle) {
           final particle = String.fromCharCode(runes[pos]);
-          words.add(particle);
+          words.add(SegmentedWord(particle));
           pos++;
           continue;  // Skip the rest of the matching logic
         }
@@ -618,7 +627,7 @@ class WordSegmenter {
         if (matchLength > 0) {
           // Found a word match - extract it
           final word = String.fromCharCodes(runes.sublist(pos, pos + matchLength));
-          words.add(word);
+          words.add(SegmentedWord(word));
           pos += matchLength;
         } else {
           // No match found - collect all consecutive unmatched characters as grammar token
@@ -659,7 +668,7 @@ class WordSegmenter {
           // Extract the grammar token
           if (pos > grammarStart) {
             final grammar = String.fromCharCodes(runes.sublist(grammarStart, pos));
-            words.add(grammar);
+            words.add(SegmentedWord(grammar));
           }
         }
       }
@@ -1087,10 +1096,14 @@ String convertWithSegmentation(PhonemeConverter converter, String text, WordSegm
   // 🔥 STEP 3: Convert each word to phonemes with particle handling
   final phonemes = words.map((word) {
     // Special handling for the topic particle は → "wa"
-    if (word == 'は') {
+    if (word.text == 'は') {
       return 'wa';
+    } else if (word.isFuriganaReading) {
+      // Convert the reading (hiragana/katakana) directly to phonemes
+      return converter.convert(word.text) ?? word.text;
     } else {
-      return converter.convert(word) ?? word;
+      // Normal word - convert through phoneme dictionary
+      return converter.convert(word.text) ?? word.text;
     }
   }).toList();
   
@@ -1114,16 +1127,32 @@ ConversionResult convertDetailedWithSegmentation(PhonemeConverter converter, Str
   
   for (var word in words) {
     // Special handling for the topic particle は → "wa"
-    if (word == 'は') {
+    if (word.text == 'は') {
       phonemeParts.add('wa');
       // Add to matches for consistency
       allMatches.add(Match(
-        original: word,
+        original: word.text,
         phoneme: 'wa',
         startIndex: byteOffset,
       ));
+    } else if (word.isFuriganaReading) {
+      // Convert the reading (hiragana/katakana) directly to phonemes
+      final wordResult = converter.convertDetailed(word.text);
+      
+      // Adjust match positions to account for original text position
+      for (var match in wordResult.matches) {
+        allMatches.add(Match(
+          original: match.original,
+          phoneme: match.phoneme,
+          startIndex: match.startIndex + byteOffset,
+        ));
+      }
+      
+      phonemeParts.add(wordResult.phonemes);
+      allUnmatched.addAll(wordResult.unmatched);
     } else {
-      final wordResult = converter.convertDetailed(word);
+      // Normal word - convert through phoneme dictionary
+      final wordResult = converter.convertDetailed(word.text);
       
       // Adjust match positions to account for original text position
       for (var match in wordResult.matches) {
@@ -1138,7 +1167,7 @@ ConversionResult convertDetailedWithSegmentation(PhonemeConverter converter, Str
       allUnmatched.addAll(wordResult.unmatched);
     }
     
-    byteOffset += word.length;
+    byteOffset += word.text.length;
   }
   
   return ConversionResult(

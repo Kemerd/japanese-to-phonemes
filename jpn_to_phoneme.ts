@@ -223,6 +223,14 @@ interface TextSegment {
 }
 
 /**
+ * Represents a segmented word with metadata about its origin
+ */
+interface SegmentedWord {
+  text: string;
+  isFuriganaReading: boolean;  // True if this came from a furigana hint and shouldn't be re-converted
+}
+
+/**
  * Individual match from Japanese text to phoneme
  */
 interface Match {
@@ -619,14 +627,15 @@ class WordSegmenter {
    * 
    * @param phonemeRoot Optional phoneme trie root for fallback lookups
    */
-  segmentFromSegments(segments: TextSegment[], phonemeRoot?: TrieNode): string[] {
-    const words: string[] = [];
+  segmentFromSegments(segments: TextSegment[], phonemeRoot?: TrieNode): SegmentedWord[] {
+    const words: SegmentedWord[] = [];
     
     // Process each segment
     for (const segment of segments) {
       // For furigana segments, treat the entire reading as one word
+      // Mark it as furigana so conversion knows to use it directly
       if (segment.type === SegmentType.FURIGANA_HINT) {
-        words.push(segment.reading);
+        words.push({ text: segment.reading, isFuriganaReading: true });
         continue;
       }
       
@@ -693,7 +702,7 @@ class WordSegmenter {
         if (treatAsParticle) {
           const startIdx = positions[pos];
           const endIdx = positions[pos + 1];
-          words.push(text.substring(startIdx, endIdx));
+          words.push({ text: text.substring(startIdx, endIdx), isFuriganaReading: false });
           pos++;
           continue;  // Skip the rest of the matching logic
         }
@@ -736,7 +745,7 @@ class WordSegmenter {
           // Found a word match - extract it
           const startIdx = positions[pos];
           const endIdx = positions[pos + matchLength];
-          words.push(text.substring(startIdx, endIdx));
+          words.push({ text: text.substring(startIdx, endIdx), isFuriganaReading: false });
           pos += matchLength;
         } else {
           // No match found - collect all consecutive unmatched characters as grammar token
@@ -779,7 +788,7 @@ class WordSegmenter {
           if (pos > grammarStart) {
             const startIdx = positions[grammarStart];
             const endIdx = positions[pos];
-            words.push(text.substring(startIdx, endIdx));
+            words.push({ text: text.substring(startIdx, endIdx), isFuriganaReading: false });
           }
         }
       }
@@ -1300,10 +1309,14 @@ function convertWithSegmentation(converter: PhonemeConverter, text: string, segm
     if (i > 0) result.push(' ');  // Add space between words
     
     // Special handling for the topic particle は → "wa"
-    if (words[i] === 'は') {
+    if (words[i].text === 'は') {
       result.push('wa');
+    } else if (words[i].isFuriganaReading) {
+      // Convert the reading (hiragana/katakana) directly to phonemes
+      result.push(converter.convert(words[i].text));
     } else {
-      result.push(converter.convert(words[i]));
+      // Normal word - convert through phoneme dictionary
+      result.push(converter.convert(words[i].text));
     }
   }
   
@@ -1332,16 +1345,32 @@ function convertDetailedWithSegmentation(converter: PhonemeConverter, text: stri
     if (i > 0) phonemeParts.push(' ');  // Add space between words
     
     // Special handling for the topic particle は → "wa"
-    if (words[i] === 'は') {
+    if (words[i].text === 'は') {
       phonemeParts.push('wa');
       // Add to matches for consistency
       allMatches.push({
-        original: words[i],
+        original: words[i].text,
         phoneme: 'wa',
         startIndex: byteOffset
       });
+    } else if (words[i].isFuriganaReading) {
+      // Convert the reading (hiragana/katakana) directly to phonemes
+      const wordResult = converter.convertDetailed(words[i].text);
+      
+      // Adjust match positions to account for original text position
+      for (const match of wordResult.matches) {
+        allMatches.push({
+          original: match.original,
+          phoneme: match.phoneme,
+          startIndex: match.startIndex + byteOffset,
+        });
+      }
+      
+      phonemeParts.push(wordResult.phonemes);
+      allUnmatched.push(...wordResult.unmatched);
     } else {
-      const wordResult = converter.convertDetailed(words[i]);
+      // Normal word - convert through phoneme dictionary
+      const wordResult = converter.convertDetailed(words[i].text);
       
       // Adjust match positions to account for original text position
       for (const match of wordResult.matches) {
@@ -1356,7 +1385,7 @@ function convertDetailedWithSegmentation(converter: PhonemeConverter, text: stri
       allUnmatched.push(...wordResult.unmatched);
     }
     
-    byteOffset += words[i].length;
+    byteOffset += words[i].text.length;
   }
   
   return {

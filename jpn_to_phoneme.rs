@@ -71,6 +71,29 @@ struct TextSegment {
     original_pos: usize,  // Position in original text
 }
 
+/// Represents a segmented word with metadata about its origin
+#[derive(Debug, Clone)]
+struct SegmentedWord {
+    text: String,
+    is_furigana_reading: bool,  // True if this came from a furigana hint and shouldn't be re-converted
+}
+
+impl SegmentedWord {
+    fn new(text: String) -> Self {
+        SegmentedWord {
+            text,
+            is_furigana_reading: false,
+        }
+    }
+    
+    fn new_furigana(text: String) -> Self {
+        SegmentedWord {
+            text,
+            is_furigana_reading: true,
+        }
+    }
+}
+
 impl TextSegment {
     // Constructor for normal text
     fn new_normal(text: String, pos: usize) -> Self {
@@ -637,14 +660,15 @@ impl WordSegmenter {
     /// treating each segment as an atomic unit during segmentation.
     /// 
     /// @param phoneme_root Optional phoneme trie root for fallback lookups
-    fn segment_from_segments(&self, segments: &[TextSegment], phoneme_root: Option<&TrieNode>) -> Vec<String> {
+    fn segment_from_segments(&self, segments: &[TextSegment], phoneme_root: Option<&TrieNode>) -> Vec<SegmentedWord> {
         let mut words = Vec::new();
         
         // Process each segment
         for segment in segments {
             // For furigana segments, treat the entire reading as one word
+            // Mark it as furigana so conversion knows to use it directly
             if matches!(segment.segment_type, SegmentType::FuriganaHint) {
-                words.push(segment.reading.clone());
+                words.push(SegmentedWord::new_furigana(segment.reading.clone()));
                 continue;
             }
             
@@ -715,7 +739,7 @@ impl WordSegmenter {
                 
                 // If it's a standalone particle, treat it as a single token
                 if treat_as_particle {
-                    words.push(chars[pos].to_string());
+                    words.push(SegmentedWord::new(chars[pos].to_string()));
                     pos += 1;
                     continue;  // Skip the rest of the matching logic
                 }
@@ -767,7 +791,7 @@ impl WordSegmenter {
                 if match_length > 0 {
                     // Found a word match - extract it
                     let word: String = chars[pos..pos + match_length].iter().collect();
-                    words.push(word);
+                    words.push(SegmentedWord::new(word));
                     pos += match_length;
                 } else {
                     // No match found - collect all consecutive unmatched characters as grammar token
@@ -813,7 +837,7 @@ impl WordSegmenter {
                     // Extract the grammar token
                     if pos > grammar_start {
                         let grammar: String = chars[grammar_start..pos].iter().collect();
-                        words.push(grammar);
+                        words.push(SegmentedWord::new(grammar));
                     }
                 }
             }
@@ -1291,10 +1315,14 @@ fn convert_with_segmentation(converter: &PhonemeConverter, text: &str, segmenter
     // 🔥 STEP 3: Convert each word to phonemes with particle handling
     let phonemes: Vec<String> = words.iter().map(|word| {
         // Special handling for the topic particle は → "wa"
-        if word == "は" {
+        if word.text == "は" {
             "wa".to_string()
+        } else if word.is_furigana_reading {
+            // Convert the reading (hiragana/katakana) directly to phonemes
+            converter.convert(&word.text)
         } else {
-            converter.convert(word)
+            // Normal word - convert through phoneme dictionary
+            converter.convert(&word.text)
         }
     }).collect();
     
@@ -1318,16 +1346,29 @@ fn convert_detailed_with_segmentation(converter: &PhonemeConverter, text: &str, 
     
     for word in &words {
         // Special handling for the topic particle は → "wa"
-        if word == "は" {
+        if word.text == "は" {
             phoneme_parts.push("wa".to_string());
             // Add to matches for consistency
             all_matches.push(Match {
-                original: word.clone(),
+                original: word.text.clone(),
                 phoneme: "wa".to_string(),
                 start_index: byte_offset,
             });
+        } else if word.is_furigana_reading {
+            // Convert the reading (hiragana/katakana) directly to phonemes
+            let mut word_result = converter.convert_detailed(&word.text);
+            
+            // Adjust match positions to account for original text position
+            for match_item in &mut word_result.matches {
+                match_item.start_index += byte_offset;
+                all_matches.push(match_item.clone());
+            }
+            
+            phoneme_parts.push(word_result.phonemes);
+            all_unmatched.extend(word_result.unmatched);
         } else {
-            let mut word_result = converter.convert_detailed(word);
+            // Normal word - convert through phoneme dictionary
+            let mut word_result = converter.convert_detailed(&word.text);
             
             // Adjust match positions to account for original text position
             for match_item in &mut word_result.matches {
@@ -1339,7 +1380,7 @@ fn convert_detailed_with_segmentation(converter: &PhonemeConverter, text: &str, 
             all_unmatched.extend(word_result.unmatched);
         }
         
-        byte_offset += word.len();
+        byte_offset += word.text.len();
     }
     
     ConversionResult {
