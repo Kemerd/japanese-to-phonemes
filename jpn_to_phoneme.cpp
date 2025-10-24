@@ -1170,10 +1170,11 @@ public:
                     
                     current = it->second.get();
                     
-                    // If this node marks end of word, it's a valid match
-                    if (current->phoneme.has_value()) {
-                        match_length = i - pos + 1;
-                    }
+                        // If this node marks end of word, it's a valid match
+                        // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                        if (current->phoneme.has_value() && !current->phoneme.value().empty()) {
+                            match_length = i - pos + 1;
+                        }
                 }
                 
                 // 🔥 FALLBACK: If word dictionary didn't find a match, try phoneme dictionary
@@ -1189,7 +1190,8 @@ public:
                         phoneme_current = it->second.get();
                         
                         // If this node has a phoneme, it's a valid word
-                        if (phoneme_current->phoneme.has_value()) {
+                        // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                        if (phoneme_current->phoneme.has_value() && !phoneme_current->phoneme.value().empty()) {
                             match_length = i - pos + 1;
                         }
                     }
