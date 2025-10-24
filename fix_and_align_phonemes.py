@@ -1514,6 +1514,26 @@ def fix_particle_ha_in_phoneme(kanji, phoneme):
     # Pattern: Check if the kanji contains particle は patterns
     # We need to be careful - only fix when は is clearly a particle
     
+    # ============================================================
+    # SPECIAL CHECK: Words ending with は
+    # ============================================================
+    # If the word ends with は, check if it should be "wa"
+    if kanji.endswith('は'):
+        # Exceptions that should keep "ha" pronunciation
+        KEEP_HA_ENDINGS = {
+            'あはは',      # ahaha (laughter)
+            'うはうは',    # uhauha (laughter)
+            'ははは',      # hahaha (laughter)
+            'わはは',      # wahaha (laughter)
+            'おは',        # oha (short for ohayou)
+            'ろは',        # roha (as in いろは iroha)
+        }
+        
+        # If it's not an exception and ends with 'ha', change to 'wa'
+        if kanji not in KEEP_HA_ENDINGS and phoneme.endswith('ha'):
+            phoneme = phoneme[:-2] + 'wa'
+            return phoneme  # Return early since we already fixed it
+    
     particle_patterns = [
         # ============================================================
         # COMPOUND PARTICLE PATTERNS (では, には, etc.)
@@ -1819,10 +1839,10 @@ def main():
             # Add if missing
             data[kanji] = correct_phoneme
             kanji_fixes += 1
-    print(f"   Fixed/added {kanji_fixes} standalone kanji readings (水→mizu, 山→yama, etc.)")
+    print(f"   Fixed/added {kanji_fixes} standalone kanji readings (water->mizu, mountain->yama, etc.)")
     
     # Step 0.9: Fix compound words with special readings (jukujikun)
-    print("\nStep 0.9: Fixing compound words with special readings (今日→kyou, 明日→ashita, etc.)...")
+    print("\nStep 0.9: Fixing compound words with special readings (kyou for today, ashita for tomorrow, etc.)...")
     compound_fixes = 0
     for compound, correct_phoneme in COMPOUND_WORD_FIXES.items():
         if compound in data:
@@ -1834,7 +1854,7 @@ def main():
             # Add if missing
             data[compound] = correct_phoneme
             compound_fixes += 1
-    print(f"   Fixed/added {compound_fixes} compound word readings (今日→kyou, 大人→otona, etc.)")
+    print(f"   Fixed/added {compound_fixes} compound word readings (kyou for today, otona for adult, etc.)")
     
     # Step 1: Add/fix missing basic kana, numbers, common characters, and verbs
     print("\nStep 1: Adding/fixing basic hiragana, katakana, numbers, common verbs, and characters...")
@@ -2094,8 +2114,8 @@ def main():
         print(f"   - ja_words.txt (word segmentation dictionary)")
         print(f"   - japanese.trie (simple binary format - direct TrieNode* load!)")
     print(f"\nNote: Particle ha -> wa fixes applied (de wa->dewa, kore wa->korewa, etc.)")
-    print(f"Note: Standalone kanji use kun-yomi (水=mizu not sui, 山=yama not san, etc.)")
-    print(f"Note: Compound words use special readings (今日=kyou, 大人=otona, 明日=ashita, etc.)")
+    print(f"Note: Standalone kanji use kun-yomi (water=mizu not sui, mountain=yama not san, etc.)")
+    print(f"Note: Compound words use special readings (kyou for today, otona for adult, ashita for tomorrow, etc.)")
     print(f"Note: Punctuation in input text will pass through unchanged")
     print(f"Note: All verb conjugations (past, te-form, negative, etc.) are now in dictionary")
     print(f"Note: Handles BOTH multi-char sequences (ts, dz, etc.) AND ligatures in verb conjugations")

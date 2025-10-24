@@ -1131,9 +1131,68 @@ public:
                     //current_char == 0x304B     // か (question)
                 );
                 
+                // 🔥 ENHANCED: Check if は appears after common words that typically precede topic marker
+                // This ensures proper segmentation of patterns like 今日は → 今日 + は
+                bool force_particle_separation = false;
+                if (current_char == 0x306F && pos > 0) {  // は after something
+                    // Check if preceded by common words that often use は as topic marker
+                    if (pos >= 2) {
+                        // Check for 今日 (きょう) - U+4ECA (今) U+65E5 (日)
+                        if (pos >= 2 && chars[pos-2] == 0x4ECA && chars[pos-1] == 0x65E5) {
+                            force_particle_separation = true;
+                        }
+                        // Check for 今晩 (こんばん) - U+4ECA (今) U+6669 (晩)
+                        else if (pos >= 2 && chars[pos-2] == 0x4ECA && chars[pos-1] == 0x6669) {
+                            force_particle_separation = true;
+                        }
+                    }
+                    // Check if は appears after any kanji/kana that isn't likely a verb stem
+                    // This is a more general approach
+                    if (!force_particle_separation && pos > 0) {
+                        uint32_t prev_char = chars[pos-1];
+                        // If previous character is kanji (CJK Unified Ideographs)
+                        if ((prev_char >= 0x4E00 && prev_char <= 0x9FFF) ||
+                            (prev_char >= 0x3400 && prev_char <= 0x4DBF)) {
+                            // Check if the kanji + は forms a known verb in the phoneme dictionary
+                            // If not, it's likely は is a particle
+                            bool is_verb_stem = false;
+                            if (phoneme_root != nullptr) {
+                                // Try to find if this could be a verb (would have more characters after は)
+                                TrieNode* check_node = phoneme_root;
+                                // Walk back to find start of current word
+                                size_t word_start = pos;
+                                while (word_start > 0) {
+                                    uint32_t c = chars[word_start-1];
+                                    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') break;
+                                    word_start--;
+                                }
+                                // Now check if word_start to pos+1 (including は) starts a verb
+                                bool valid_path = true;
+                                for (size_t i = word_start; i <= pos && valid_path; i++) {
+                                    auto it = check_node->children.find(chars[i]);
+                                    if (it == check_node->children.end()) {
+                                        valid_path = false;
+                                    } else {
+                                        check_node = it->second.get();
+                                    }
+                                }
+                                // If we have a valid path through は and there are more characters that could complete a verb
+                                if (valid_path && check_node && pos + 1 < chars.size()) {
+                                    // Check if continuing would form a word
+                                    auto next_it = check_node->children.find(chars[pos + 1]);
+                                    is_verb_stem = (next_it != check_node->children.end());
+                                }
+                            }
+                            if (!is_verb_stem) {
+                                force_particle_separation = true;
+                            }
+                        }
+                    }
+                }
+                
                 // If it's a potential particle, check if it can form a multi-character word
                 bool treat_as_particle = false;
-                if (is_potential_particle) {
+                if (is_potential_particle || force_particle_separation) {
                     // Use longest-match algorithm to check if this particle forms a longer word
                     // Walk the trie as far as possible to find ANY multi-char word starting here
                     bool has_longer_match = false;
