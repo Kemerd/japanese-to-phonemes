@@ -384,7 +384,8 @@ class PhonemeConverter {
         if (current === null) break;
         
         // If this node has a phoneme, it's a valid match
-        if (current.phoneme !== null) {
+        // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+        if (current.phoneme !== null && current.phoneme.length > 0) {
           matchLength = i - pos + 1;
           matchedPhoneme = current.phoneme;
         }
@@ -431,7 +432,8 @@ class PhonemeConverter {
         
         if (current === null) break;
         
-        if (current.phoneme !== null) {
+        // 🔥 FIX: Skip empty phonemes (word markers from binary trie)
+        if (current.phoneme !== null && current.phoneme.length > 0) {
           matchLength = i - pos + 1;
           matchedPhoneme = current.phoneme;
         }
@@ -660,7 +662,8 @@ class WordSegmenter {
           if (current === null) break;
           
           // If this node marks end of word, it's a valid match
-          if (current.phoneme !== null) {
+          // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+          if (current.phoneme !== null && current.phoneme.length > 0) {
             matchLength = i - pos + 1;
           }
         }
@@ -675,7 +678,8 @@ class WordSegmenter {
             if (phonemeCurrent === null) break;
             
             // If this node has a phoneme, it's a valid word
-            if (phonemeCurrent.phoneme !== null) {
+            // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+            if (phonemeCurrent.phoneme !== null && phonemeCurrent.phoneme.length > 0) {
               matchLength = i - pos + 1;
             }
           }

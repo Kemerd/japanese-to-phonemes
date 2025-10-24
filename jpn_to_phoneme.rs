@@ -560,8 +560,11 @@ impl WordSegmenter {
                     current = child;
                     
                     // If this node marks end of word, it's a valid match
-                    if current.phoneme.is_some() {
-                        match_length = i - pos + 1;
+                    // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                    if let Some(ref phoneme) = current.phoneme {
+                        if !phoneme.is_empty() {
+                            match_length = i - pos + 1;
+                        }
                     }
                 } else {
                     break;
@@ -593,8 +596,11 @@ impl WordSegmenter {
                         if let Some(child) = lookahead.children.get(&chars[i]) {
                             lookahead = child;
                             
-                            if lookahead.phoneme.is_some() {
-                                lookahead_match = i - pos + 1;
+                            // 🔥 FIX: Skip empty phonemes
+                            if let Some(ref phoneme) = lookahead.phoneme {
+                                if !phoneme.is_empty() {
+                                    lookahead_match = i - pos + 1;
+                                }
                             }
                         } else {
                             break;
@@ -724,8 +730,11 @@ impl WordSegmenter {
                         current = child;
                         
                         // If this node marks end of word, it's a valid match
-                        if current.phoneme.is_some() {
-                            match_length = i - pos + 1;
+                        // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                        if let Some(ref phoneme) = current.phoneme {
+                            if !phoneme.is_empty() {
+                                match_length = i - pos + 1;
+                            }
                         }
                     } else {
                         break;
@@ -742,8 +751,11 @@ impl WordSegmenter {
                                 phoneme_current = child;
                                 
                                 // If this node has a phoneme, it's a valid word
-                                if phoneme_current.phoneme.is_some() {
-                                    match_length = i - pos + 1;
+                                // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                                if let Some(ref phoneme) = phoneme_current.phoneme {
+                                    if !phoneme.is_empty() {
+                                        match_length = i - pos + 1;
+                                    }
                                 }
                             } else {
                                 break;
@@ -778,8 +790,11 @@ impl WordSegmenter {
                             if let Some(child) = lookahead.children.get(&chars[i]) {
                                 lookahead = child;
                                 
-                                if lookahead.phoneme.is_some() {
-                                    lookahead_match = i - pos + 1;
+                                // 🔥 FIX: Skip empty phonemes
+                                if let Some(ref phoneme) = lookahead.phoneme {
+                                    if !phoneme.is_empty() {
+                                        lookahead_match = i - pos + 1;
+                                    }
                                 }
                             } else {
                                 break;

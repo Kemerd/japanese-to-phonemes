@@ -440,7 +440,8 @@ class WordSegmenter {
         if (current == null) break;
         
         // If this node marks end of word, it's a valid match
-        if (current.phoneme != null) {
+        // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+        if (current.phoneme != null && current.phoneme!.isNotEmpty) {
           matchLength = i - pos + 1;
         }
       }
@@ -472,7 +473,8 @@ class WordSegmenter {
             
             if (lookahead == null) break;
             
-            if (lookahead.phoneme != null) {
+            // 🔥 FIX: Skip empty phonemes
+            if (lookahead.phoneme != null && lookahead.phoneme!.isNotEmpty) {
               lookaheadMatch = i - pos + 1;
             }
           }
@@ -591,7 +593,8 @@ class WordSegmenter {
           if (current == null) break;
           
           // If this node marks end of word, it's a valid match
-          if (current.phoneme != null) {
+          // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+          if (current.phoneme != null && current.phoneme!.isNotEmpty) {
             matchLength = i - pos + 1;
           }
         }
@@ -605,7 +608,8 @@ class WordSegmenter {
             if (phonemeCurrent == null) break;
             
             // If this node has a phoneme, it's a valid word
-            if (phonemeCurrent.phoneme != null) {
+            // 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+            if (phonemeCurrent.phoneme != null && phonemeCurrent.phoneme!.isNotEmpty) {
               matchLength = i - pos + 1;
             }
           }
@@ -637,7 +641,8 @@ class WordSegmenter {
               lookahead = lookahead.children[runes[i]];
               if (lookahead == null) break;
               
-              if (lookahead.phoneme != null) {
+              // 🔥 FIX: Skip empty phonemes
+              if (lookahead.phoneme != null && lookahead.phoneme!.isNotEmpty) {
                 lookaheadMatch = i - pos + 1;
               }
             }
@@ -886,7 +891,8 @@ List<TextSegment> parseFuriganaSegments(String text, {WordSegmenter? segmenter, 
           for (int i = afterBracket; i < runes.length && current != null; i++) {
             current = current.children[runes[i]];
             if (current == null) break;
-            if (current.phoneme != null) {
+            // 🔥 FIX: Skip empty phonemes
+            if (current.phoneme != null && current.phoneme!.isNotEmpty) {
               compoundLength = i - afterBracket + 1;
             }
           }

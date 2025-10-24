@@ -378,7 +378,8 @@ def parse_furigana_hints(text: str, segmenter=None, phoneme_root=None) -> List[T
                         current = current.children[char_code]
                         
                         # Check if this is a valid word ending
-                        if current.phoneme is not None:
+                        # 🔥 FIX: Skip empty phonemes
+                        if current.phoneme is not None and current.phoneme != "":
                             compound_length = j + 1
                 
                 # Track the longest compound
@@ -623,10 +624,33 @@ class WordSegmenter:
             # If it's a potential particle, check if it can form a multi-character word
             treat_as_particle = False
             if is_potential_particle:
-                # Note: Python's segment method doesn't have phoneme_root access
-                # For now, just treat は as a particle unless we add more context
-                # This is a simplified version compared to other implementations
-                treat_as_particle = True
+                # Use longest-match algorithm to check if this particle forms a longer word
+                # Walk the trie as far as possible to find ANY multi-char word starting here
+                has_longer_match = False
+                
+                if pos + 1 < len(text):
+                    check_node = self.root
+                    
+                    # Walk through as many characters as possible
+                    i = pos
+                    while i < len(text) and check_node is not None:
+                        char_code = ord(text[i])
+                        check_node = check_node.children.get(char_code)
+                        if check_node is None:
+                            break
+                        
+                        # 🔥 KEY CHECK: Only treat as a longer word if:
+                        #   - It's multi-character (i > pos)
+                        #   - Has a phoneme value (is not None)
+                        #   - Phoneme is NON-EMPTY (!= "")
+                        # This ensures "はまず" with empty phoneme → は is still a particle
+                        if i > pos and check_node.phoneme is not None and check_node.phoneme != "":
+                            has_longer_match = True
+                            break  # Found a longer word with valid phonemes, stop checking
+                        i += 1
+                
+                # Only treat as particle if it DOESN'T form a longer word
+                treat_as_particle = not has_longer_match
             
             # If it's a standalone particle, treat it as a single token
             if treat_as_particle:
@@ -647,7 +671,8 @@ class WordSegmenter:
                     break
                 
                 # If this node marks end of word, it's a valid match
-                if current.phoneme is not None:
+                # 🔥 FIX: Skip empty phonemes (word markers from ja_words.txt)
+                if current.phoneme is not None and current.phoneme != "":
                     match_length = i - pos + 1
                 
                 i += 1
@@ -679,7 +704,8 @@ class WordSegmenter:
                         if lookahead is None:
                             break
                         
-                        if lookahead.phoneme is not None:
+                        # 🔥 FIX: Skip empty phonemes
+                        if lookahead.phoneme is not None and lookahead.phoneme != "":
                             lookahead_match = i - pos + 1
                     
                     # If we found a word match, stop here
