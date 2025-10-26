@@ -69,10 +69,28 @@ BASIC_HIRAGANA = {
     'ら': 'ɾa', 'り': 'ɾi', 'る': 'ɾɯ', 'れ': 'ɾe', 'ろ': 'ɾo',
     'わ': 'ɰa', 'ゐ': 'i', 'ゑ': 'e', 'を': 'o', 'ん': 'ɴ',
     'ゔ': 'vɯ',
-    # Small characters
-    'ぁ': 'a', 'ぃ': 'i', 'ぅ': 'ɯ', 'ぇ': 'e', 'ぉ': 'o',
-    'ゃ': 'ja', 'ゅ': 'jɯ', 'ょ': 'jo',
-    'ゎ': 'ɰa', 'っ': 'ʔ',
+
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONTRACTED SOUNDS (拗音) - Complete set for hiragana
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTRACTED_HIRAGANA = {
+    # Standard contracted sounds with small ya/yu/yo
+    'きゃ': 'kja', 'きゅ': 'kjɯ', 'きょ': 'kjo',
+    'しゃ': 'ɕa', 'しゅ': 'ɕɯ', 'しょ': 'ɕo',
+    'ちゃ': 'ʨa', 'ちゅ': 'ʨɯ', 'ちょ': 'ʨo',
+    'にゃ': 'nja', 'にゅ': 'njɯ', 'にょ': 'njo',
+    'ひゃ': 'ça', 'ひゅ': 'çɯ', 'ひょ': 'ço',
+    'みゃ': 'mja', 'みゅ': 'mjɯ', 'みょ': 'mjo',
+    'りゃ': 'ɾja', 'りゅ': 'ɾjɯ', 'りょ': 'ɾjo',
+    'ぎゃ': 'gja', 'ぎゅ': 'gjɯ', 'ぎょ': 'gjo',
+    'じゃ': 'ʥa', 'じゅ': 'ʥɯ', 'じょ': 'ʥo',
+    'びゃ': 'bja', 'びゅ': 'bjɯ', 'びょ': 'bjo',
+    'ぴゃ': 'pja', 'ぴゅ': 'pjɯ', 'ぴょ': 'pjo',
+    
+    # Extended contracted sounds with small vowels (rare in hiragana, but exist)
+    'ゔぁ': 'va', 'ゔぃ': 'vi', 'ゔぇ': 've', 'ゔぉ': 'vo',
 }
 
 # Basic katakana to add if missing (using IPA ligatures)
@@ -93,12 +111,110 @@ BASIC_KATAKANA = {
     'ラ': 'ɾa', 'リ': 'ɾi', 'ル': 'ɾɯ', 'レ': 'ɾe', 'ロ': 'ɾo',
     'ワ': 'ɰa', 'ヰ': 'i', 'ヱ': 'e', 'ヲ': 'o', 'ン': 'ɴ',
     'ヴ': 'vɯ', 'ヵ': 'ka', 'ヶ': 'ke',
-    # Small characters
+    # Small characters (NOTE: Small ya/yu/yo ャュョ are NOT included - they only appear in contracted sounds!)
     'ァ': 'a', 'ィ': 'i', 'ゥ': 'ɯ', 'ェ': 'e', 'ォ': 'o',
-    'ャ': 'ja', 'ュ': 'jɯ', 'ョ': 'jo',
     'ヮ': 'ɰa', 'ッ': 'ʔ',
     # Extended katakana
     'ヷ': 'va', 'ヸ': 'vi', 'ヹ': 've', 'ヺ': 'vo',
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONTRACTED SOUNDS (拗音) - Complete set for katakana
+# Including all extended combinations for foreign word transcription
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTRACTED_KATAKANA = {
+    # ━━━━━ Standard contracted sounds with small ya/yu/yo ━━━━━
+    'キャ': 'kja', 'キュ': 'kjɯ', 'キョ': 'kjo',
+    'シャ': 'ɕa', 'シュ': 'ɕɯ', 'ショ': 'ɕo',
+    'チャ': 'ʨa', 'チュ': 'ʨɯ', 'チョ': 'ʨo',
+    'ニャ': 'nja', 'ニュ': 'njɯ', 'ニョ': 'njo',
+    'ヒャ': 'ça', 'ヒュ': 'çɯ', 'ヒョ': 'ço',
+    'ミャ': 'mja', 'ミュ': 'mjɯ', 'ミョ': 'mjo',
+    'リャ': 'ɾja', 'リュ': 'ɾjɯ', 'リョ': 'ɾjo',
+    'ギャ': 'gja', 'ギュ': 'gjɯ', 'ギョ': 'gjo',
+    'ジャ': 'ʥa', 'ジュ': 'ʥɯ', 'ジョ': 'ʥo',
+    'ビャ': 'bja', 'ビュ': 'bjɯ', 'ビョ': 'bjo',
+    'ピャ': 'pja', 'ピュ': 'pjɯ', 'ピョ': 'pjo',
+    
+    # ━━━━━ ヴ (vu) combinations - for V sounds ━━━━━
+    'ヴァ': 'va', 'ヴィ': 'vi', 'ヴ': 'vɯ', 'ヴェ': 've', 'ヴォ': 'vo',
+    'ヴャ': 'vja', 'ヴュ': 'vjɯ', 'ヴョ': 'vjo',
+    
+    # ━━━━━ ファ行 - F sounds (foreign words) ━━━━━
+    'ファ': 'ɸa', 'フィ': 'ɸi', 'フ': 'ɸɯ', 'フェ': 'ɸe', 'フォ': 'ɸo',
+    'フャ': 'ɸja', 'フュ': 'ɸjɯ', 'フョ': 'ɸjo',
+    
+    # ━━━━━ ウィ/ウェ/ウォ - W sounds ━━━━━
+    'ウィ': 'ɰi', 'ウェ': 'ɰe', 'ウォ': 'ɰo',
+    
+    # ━━━━━ ティ/トゥ/テュ - T sounds (foreign) ━━━━━
+    'ティ': 'ti', 'テュ': 'tɯ', 'トゥ': 'tɯ',
+    'テァ': 'tea', 'ティ': 'tei', 'テェ': 'tee', 'テォ': 'teo',
+    
+    # ━━━━━ ディ/ドゥ/デュ - D sounds (foreign) ━━━━━
+    'ディ': 'di', 'デュ': 'dɯ', 'ドゥ': 'dɯ',
+    'デァ': 'dea', 'ディ': 'dei', 'デェ': 'dee', 'デォ': 'deo',
+    
+    # ━━━━━ シェ/ジェ/チェ - palatalized e sounds ━━━━━
+    'シェ': 'ɕe', 'ジェ': 'ʥe', 'チェ': 'ʨe',
+    
+    # ━━━━━ ツァ/ツィ/ツェ/ツォ - TS sounds ━━━━━
+    'ツァ': 'ʦa', 'ツィ': 'ʦi', 'ツェ': 'ʦe', 'ツォ': 'ʦo',
+    
+    # ━━━━━ クァ/クィ/クェ/クォ - KW sounds ━━━━━
+    'クァ': 'kɰa', 'クィ': 'kɰi', 'クェ': 'kɰe', 'クォ': 'kɰo',
+    'クヮ': 'kɰa',
+    
+    # ━━━━━ グァ/グィ/グェ/グォ - GW sounds ━━━━━
+    'グァ': 'gɰa', 'グィ': 'gɰi', 'グェ': 'gɰe', 'グォ': 'gɰo',
+    'グヮ': 'gɰa',
+    
+    # ━━━━━ ドゥ variations ━━━━━
+    'ドァ': 'doa', 'ドィ': 'doi', 'ドェ': 'doe', 'ドォ': 'doo',
+    
+    # ━━━━━ トゥ variations ━━━━━
+    'トァ': 'toa', 'トィ': 'toi', 'トェ': 'toe', 'トォ': 'too',
+    
+    # ━━━━━ イェ - YE sound ━━━━━
+    'イェ': 'je',
+    
+    # ━━━━━ スィ - SI (foreign) ━━━━━
+    'スィ': 'si',
+    
+    # ━━━━━ ズィ - ZI (foreign) ━━━━━
+    'ズィ': 'zi',
+    
+    # ━━━━━ Extended combinations with small vowels for all consonants ━━━━━
+    # K sounds
+    'カ': 'ka', 'キ': 'ki', 'ク': 'kɯ', 'ケ': 'ke', 'コ': 'ko',
+    'キェ': 'kie',
+    
+    # G sounds  
+    'ギェ': 'gie',
+    
+    # S sounds
+    'スァ': 'sɰa', 'スィ': 'si', 'スェ': 'sɰe', 'スォ': 'sɰo',
+    
+    # Z sounds
+    'ズァ': 'zɰa', 'ズィ': 'zi', 'ズェ': 'zɰe', 'ズォ': 'zɰo',
+    
+    # N sounds with small vowels
+    'ニェ': 'nie',
+    
+    # H sounds with small vowels
+    'ヒェ': 'çie',
+    
+    # B sounds with small vowels
+    'ビェ': 'bie',
+    
+    # P sounds with small vowels
+    'ピェ': 'pie',
+    
+    # M sounds with small vowels
+    'ミェ': 'mie',
+    
+    # R sounds with small vowels
+    'リェ': 'ɾie',
 }
 
 # Common kanji that should be added
@@ -1865,7 +1981,9 @@ def main():
     # Combine all basic entries
     all_basic_entries = {
         **BASIC_HIRAGANA, 
-        **BASIC_KATAKANA, 
+        **BASIC_KATAKANA,
+        **CONTRACTED_HIRAGANA,  # Add all contracted sounds (しゃ, きゃ, etc.)
+        **CONTRACTED_KATAKANA,  # Add all contracted sounds (シャ, キャ, ヴァ, ファ, etc.)
         **COMMON_KANJI,
         **COMMON_VERBS_HIRAGANA,  # Add common verbs in hiragana
     }
@@ -2098,7 +2216,7 @@ def main():
     print(f"   - Original entries: {original_count}")
     print(f"   - Particle ha->wa fixes: {particle_fixes}")
     print(f"   - Standalone kanji fixes: {kanji_fixes} (kun-yomi corrections)")
-    print(f"   - Compound word fixes: {compound_fixes} (jukujikun like 今日→kyou)")
+    print(f"   - Compound word fixes: {compound_fixes} (jukujikun special readings)")
     print(f"   - Added missing kana/kanji: {added_count}")
     print(f"   - Verbs found: {verb_count}")
     print(f"   - Verb conjugations generated: {conjugation_count}")
