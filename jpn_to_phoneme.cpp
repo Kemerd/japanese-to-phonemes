@@ -1120,9 +1120,9 @@ public:
                 bool is_potential_particle = (
                     current_char == 0x306F ||  // は (topic marker)
                     //current_char == 0x304C ||  // が (subject marker)
-                    current_char == 0x3092   // を (object marker)
+                    current_char == 0x3092 ||  // を (object marker)
                     //current_char == 0x306B ||  // に (direction/time)
-                    //current_char == 0x3078 ||  // へ (direction)
+                    current_char == 0x3078     // へ (direction) - ENABLED for particle detection
                     //current_char == 0x3067 ||  // で (location/means)
                     //current_char == 0x3068 ||  // と (and/with)
                     //current_char == 0x3082 ||  // も (also)
@@ -1131,9 +1131,44 @@ public:
                     //current_char == 0x304B     // か (question)
                 );
                 
-                // 🔥 ENHANCED: Check if は appears after common words that typically precede topic marker
+                // 🔥 ENHANCED: Check if は/へ appears in particle-like context
                 // This ensures proper segmentation of patterns like 今日は → 今日 + は
+                // For へ: Don't treat as particle if it's at the very start (likely part of a word)
                 bool force_particle_separation = false;
+                
+                // へ special handling: Check if it's likely part of a word vs. a particle
+                // Particles typically appear AFTER nouns (東京へ, 学校へ), not at the start
+                // Also, へ followed by hiragana is usually part of a word (へそ, へや)
+                if (current_char == 0x3078) {
+                    // If へ is at position 0, it's likely part of a word
+                    if (pos == 0) {
+                        is_potential_particle = false;
+                    }
+                    // If へ is followed by hiragana/katakana, it might be part of a word
+                    // Check using phoneme dictionary if へ+next chars form a word
+                    else if (pos + 1 < chars.size() && phoneme_root != nullptr) {
+                        uint32_t next_char = chars[pos + 1];
+                        // Check if next char is hiragana or katakana
+                        bool next_is_kana = (next_char >= 0x3040 && next_char <= 0x309F) ||  // Hiragana
+                                           (next_char >= 0x30A0 && next_char <= 0x30FF);     // Katakana
+                        
+                        if (next_is_kana) {
+                            // Check if へ + next char(s) form a word in phoneme dictionary
+                            TrieNode* check_node = phoneme_root;
+                            auto it = check_node->children.find(current_char);
+                            if (it != check_node->children.end()) {
+                                check_node = it->second.get();
+                                // Check if we can continue with next char
+                                auto next_it = check_node->children.find(next_char);
+                                if (next_it != check_node->children.end()) {
+                                    // へ + next char form a valid path, likely a word not a particle
+                                    is_potential_particle = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 if (current_char == 0x306F && pos > 0) {  // は after something
                     // Check if preceded by common words that often use は as topic marker
                     if (pos >= 2) {
@@ -1994,7 +2029,9 @@ namespace SegmentedConversion {
             }
             // Special handling for the directional particle へ → "e"
             // Only apply this if NOT from furigana (furigana is always "he")
-            else if (words[i].text == "へ" || words[i].text == "\xe3\x81\xb8") {  // へ in UTF-8
+            // AND only if it comes AFTER another word (i > 0), since particles follow nouns!
+            // へそ (first word) → "heso", but 学校へ (second word) → "gakkou e"
+            else if ((words[i].text == "へ" || words[i].text == "\xe3\x81\xb8") && i > 0) {  // へ in UTF-8
                 result += "e";
             }
             else {
@@ -2054,7 +2091,9 @@ namespace SegmentedConversion {
             }
             // Special handling for the directional particle へ → "e"
             // Only apply this if NOT from furigana (furigana is always "he")
-            else if (words[i].text == "へ" || words[i].text == "\xe3\x81\xb8") {  // へ in UTF-8
+            // AND only if it comes AFTER another word (i > 0), since particles follow nouns!
+            // へそ (first word) → "heso", but 学校へ (second word) → "gakkou e"
+            else if ((words[i].text == "へ" || words[i].text == "\xe3\x81\xb8") && i > 0) {  // へ in UTF-8
                 result.phonemes += "e";
                 // Add to matches for consistency
                 Match match;
